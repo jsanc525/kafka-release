@@ -50,6 +50,7 @@ apply from: "$rootDir/gradle/dependencies.gradle"
 allprojects {
 
   repositories {
+    mavenCentral()
     maven {
       url = "$repoUrl"
     }
