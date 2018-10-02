@@ -17,8 +17,10 @@
 
 package other.kafka
 
-import java.io.{File, FileOutputStream, PrintWriter}
+import java.io.{File, PrintWriter}
+import java.nio.file.{Files, StandardOpenOption}
 
+import javax.imageio.ImageIO
 import kafka.admin.ReassignPartitionsCommand
 import kafka.admin.ReassignPartitionsCommand.Throttle
 import org.apache.kafka.common.TopicPartition
@@ -27,6 +29,9 @@ import kafka.utils.TestUtils._
 import kafka.utils.{Exit, Logging, TestUtils, ZkUtils}
 import kafka.zk.{ReassignPartitionsZNode, ZooKeeperTestHarness}
 import org.apache.kafka.clients.producer.ProducerRecord
+import org.jfree.chart.plot.PlotOrientation
+import org.jfree.chart.{ChartFactory, ChartFrame, JFreeChart}
+import org.jfree.data.xy.{XYSeries, XYSeriesCollection}
 
 import scala.collection.JavaConverters._
 import scala.collection.{Map, Seq, mutable}
@@ -122,7 +127,7 @@ object ReplicationQuotasTestRig {
       createTopic(zkClient, topicName, replicas, servers)
 
       println("Writing Data")
-      val producer = TestUtils.createProducer(TestUtils.getBrokerListStrFromServers(servers), retries = 5, acks = 0)
+      val producer = TestUtils.createProducer(TestUtils.getBrokerListStrFromServers(servers), acks = 0)
       (0 until config.msgsPerPartition).foreach { x =>
         (0 until config.partitions).foreach { partition =>
           producer.send(new ProducerRecord(topicName, partition, null, new Array[Byte](config.msgSize)))
@@ -142,6 +147,8 @@ object ReplicationQuotasTestRig {
       validateAllOffsetsMatch(config)
 
       journal.appendToJournal(config)
+      renderChart(leaderRates, "Leader", journal, displayChartsOnScreen)
+      renderChart(followerRates, "Follower", journal, displayChartsOnScreen)
       logOutput(config, replicas, newAssignment)
 
       println("Output can be found here: " + journal.path())
@@ -185,6 +192,54 @@ object ReplicationQuotasTestRig {
       }, s"Znode ${ReassignPartitionsZNode.path} wasn't deleted", 60 * 60 * 1000, pause = 1000L)
     }
 
+    def renderChart(data: mutable.Map[Int, Array[Double]], name: String, journal: Journal, displayChartsOnScreen: Boolean): Unit = {
+      val dataset = addDataToChart(data)
+      val chart = createChart(name, dataset)
+
+      writeToFile(name, journal, chart)
+      maybeDisplayOnScreen(displayChartsOnScreen, chart)
+      println(s"Chart generated for $name")
+    }
+
+    def maybeDisplayOnScreen(displayChartsOnScreen: Boolean, chart: JFreeChart): Unit = {
+      if (displayChartsOnScreen) {
+        val frame = new ChartFrame(experimentName, chart)
+        frame.pack()
+        frame.setVisible(true)
+      }
+    }
+
+    def writeToFile(name: String, journal: Journal, chart: JFreeChart): Unit = {
+      val file = new File(dir, experimentName + "-" + name + ".png")
+      ImageIO.write(chart.createBufferedImage(1000, 700), "png", file)
+      journal.appendChart(file.getAbsolutePath, name.eq("Leader"))
+    }
+
+    def createChart(name: String, dataset: XYSeriesCollection): JFreeChart = {
+      val chart: JFreeChart = ChartFactory.createXYLineChart(
+        experimentName + " - " + name + " Throttling Performance",
+        "Time (s)",
+        "Throttle Throughput (B/s)",
+        dataset
+        , PlotOrientation.VERTICAL, false, true, false
+      )
+      chart
+    }
+
+    def addDataToChart(data: mutable.Map[Int, Array[Double]]): XYSeriesCollection = {
+      val dataset = new XYSeriesCollection
+      data.foreach { case (broker, values) =>
+        val series = new XYSeries("Broker:" + broker)
+        var x = 0
+        values.foreach { value =>
+          series.add(x, value)
+          x += 1
+        }
+        dataset.addSeries(series)
+      }
+      dataset
+    }
+
     def record(rates: mutable.Map[Int, Array[Double]], brokerId: Int, currentRate: Double) = {
       var leaderRatesBroker: Array[Double] = rates.getOrElse(brokerId, Array[Double]())
       leaderRatesBroker = leaderRatesBroker ++ Array(currentRate)
@@ -210,7 +265,7 @@ object ReplicationQuotasTestRig {
     private def measuredRate(broker: KafkaServer, repType: QuotaType): Double = {
       val metricName = broker.metrics.metricName("byte-rate", repType.toString)
       if (broker.metrics.metrics.asScala.contains(metricName))
-        broker.metrics.metrics.asScala(metricName).value
+        broker.metrics.metrics.asScala(metricName).metricValue.asInstanceOf[Double]
       else -1
     }
 
@@ -256,7 +311,7 @@ object ReplicationQuotasTestRig {
     }
 
     def append(message: String): Unit = {
-      val stream = new FileOutputStream(log, true)
+      val stream = Files.newOutputStream(log.toPath, StandardOpenOption.APPEND)
       new PrintWriter(stream) {
         append(message)
         close

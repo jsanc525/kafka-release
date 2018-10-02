@@ -33,6 +33,7 @@ public class ProcessorContextImpl extends AbstractProcessorContext implements Re
 
     private final StreamTask task;
     private final RecordCollector collector;
+    private TimestampSupplier streamTimeSupplier;
     private final ToInternal toInternal = new ToInternal();
     private final static To SEND_TO_ALL = To.all();
 
@@ -54,7 +55,7 @@ public class ProcessorContextImpl extends AbstractProcessorContext implements Re
 
     @Override
     public RecordCollector recordCollector() {
-        return this.collector;
+        return collector;
     }
 
     /**
@@ -145,12 +146,21 @@ public class ProcessorContextImpl extends AbstractProcessorContext implements Re
 
     @Override
     public void commit() {
-        task.needCommit();
+        task.requestCommit();
     }
 
     @Override
     public Cancellable schedule(final long interval, final PunctuationType type, final Punctuator callback) {
         return task.schedule(interval, type, callback);
+    }
+
+    void setStreamTimeSupplier(final TimestampSupplier streamTimeSupplier) {
+        this.streamTimeSupplier = streamTimeSupplier;
+    }
+
+    @Override
+    public long streamTime() {
+        return streamTimeSupplier.get();
     }
 
 }

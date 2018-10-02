@@ -19,6 +19,7 @@ package kafka.tools
 
 import java.io.PrintStream
 import java.nio.charset.StandardCharsets
+import java.time.Duration
 import java.util.concurrent.CountDownLatch
 import java.util.regex.Pattern
 import java.util.{Collections, Locale, Properties, Random}
@@ -368,6 +369,10 @@ object ConsoleConsumer extends Logging {
         consumerProps.put(ConsumerConfig.GROUP_ID_CONFIG, group)
       case None =>
         consumerProps.put(ConsumerConfig.GROUP_ID_CONFIG, s"console-consumer-${new Random().nextInt(100000)}")
+        // By default, avoid unnecessary expansion of the coordinator cache since
+        // the auto-generated group and its offsets is not intended to be used again
+        if (!consumerProps.containsKey(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG))
+          consumerProps.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false")
         groupIdPassed = false
     }
 
@@ -384,7 +389,7 @@ object ConsoleConsumer extends Logging {
   private[tools] class ConsumerWrapper(topic: Option[String], partitionId: Option[Int], offset: Option[Long], whitelist: Option[String],
                                        consumer: Consumer[Array[Byte], Array[Byte]], val timeoutMs: Long = Long.MaxValue) {
     consumerInit()
-    var recordIter = consumer.poll(0).iterator
+    var recordIter = Collections.emptyList[ConsumerRecord[Array[Byte], Array[Byte]]]().iterator()
 
     def consumerInit() {
       (topic, partitionId, offset, whitelist) match {
@@ -428,7 +433,7 @@ object ConsoleConsumer extends Logging {
 
     def receive(): ConsumerRecord[Array[Byte], Array[Byte]] = {
       if (!recordIter.hasNext) {
-        recordIter = consumer.poll(timeoutMs).iterator
+        recordIter = consumer.poll(Duration.ofMillis(timeoutMs)).iterator
         if (!recordIter.hasNext)
           throw new TimeoutException()
       }

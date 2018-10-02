@@ -19,16 +19,29 @@ buildscript {
   repositories {
     mavenCentral()
     jcenter()
+    maven {
+      url "https://plugins.gradle.org/m2/"
+    }
   }
   apply from: file('gradle/buildscript.gradle'), to: buildscript
 
   dependencies {
     // For Apache Rat plugin to ignore non-Git files
     classpath "org.ajoberstar:grgit:1.9.3"
-    classpath 'com.github.ben-manes:gradle-versions-plugin:0.17.0'
-    classpath 'org.scoverage:gradle-scoverage:2.3.0'
-    classpath 'com.github.jengelman.gradle.plugins:shadow:2.0.4'
-    classpath 'org.owasp:dependency-check-gradle:3.1.2'
+    classpath 'com.github.ben-manes:gradle-versions-plugin:0.20.0'
+    classpath 'org.scoverage:gradle-scoverage:2.4.0'
+    classpath 'com.github.jengelman.gradle.plugins:shadow:4.0.0'
+    classpath 'org.owasp:dependency-check-gradle:3.3.2'
+    classpath "com.diffplug.spotless:spotless-plugin-gradle:3.15.0"
+    classpath "gradle.plugin.com.github.spotbugs:spotbugs-gradle-plugin:1.6.4"
+  }
+}
+
+apply plugin: "com.diffplug.gradle.spotless"
+spotless {
+  scala {
+    target 'streams/**/*.scala'
+    scalafmt('1.5.1').configFile('checkstyle/.scalafmt.conf')
   }
 }
 
@@ -79,7 +92,7 @@ allprojects {
 }
 
 ext {
-  gradleVersion = "4.8.1"
+  gradleVersion = "4.10.2"
   minJavaVersion = "8"
   buildVersionFileName = "kafka-version.properties"
 
@@ -103,28 +116,23 @@ ext {
 
 apply from: file('wrapper.gradle')
 
-if (new File('.git').exists()) {
+if (file('.git').exists()) {
   apply from: file('gradle/rat.gradle')
   rat {
     // Exclude everything under the directory that git should be ignoring via .gitignore or that isn't checked in. These
     // restrict us only to files that are checked in or are staged.
-    def repo = Grgit.open(project.file('.'))
+    def repo = Grgit.open(project.getRootDir())
     excludes = new ArrayList<String>(repo.clean(ignore: false, directories: true, dryRun: true))
     // And some of the files that we have checked in should also be excluded from this check
     excludes.addAll([
         '**/.git/**',
         '**/build/**',
         'CONTRIBUTING.md',
-        'HDP-CHANGES.txt',
-        'HDF-CHANGES.txt',
         'PULL_REQUEST_TEMPLATE.md',
         'gradlew',
         'gradlew.bat',
         'TROGDOR.md',
         '**/README.md',
-        '**/config/**',
-        '**/system_test/**',
-        '**/contrib/**',
         '**/id_rsa',
         '**/id_rsa.pub',
         'checkstyle/suppressions.xml',
@@ -144,9 +152,8 @@ subprojects {
   apply plugin: 'maven'
   apply plugin: 'signing'
   apply plugin: 'checkstyle'
-
-  if (!JavaVersion.current().isJava9Compatible())
-    apply plugin: 'findbugs'
+  if (!JavaVersion.current().isJava11Compatible())
+    apply plugin: "com.github.spotbugs"
 
   sourceCompatibility = minJavaVersion
   targetCompatibility = minJavaVersion
@@ -358,23 +365,25 @@ subprojects {
 
   checkstyle {
     configFile = new File(rootDir, "checkstyle/checkstyle.xml")
-    configProperties = [importControlFile: "$rootDir/checkstyle/import-control.xml"]
+    configProperties = checkstyleConfigProperties("import-control.xml")
     toolVersion = '8.10'
   }
   test.dependsOn('checkstyleMain', 'checkstyleTest')
 
-  if (!JavaVersion.current().isJava9Compatible()) {
-    findbugs {
-      toolVersion = "3.0.1"
-      excludeFilter = file("$rootDir/gradle/findbugs-exclude.xml")
+  if (!JavaVersion.current().isJava11Compatible()) {
+    spotbugs {
+      // 3.1.6 has a regression that breaks our build, seems to be https://github.com/spotbugs/spotbugs/pull/688
+      toolVersion = '3.1.5'
+      excludeFilter = file("$rootDir/gradle/spotbugs-exclude.xml")
       ignoreFailures = false
     }
-    test.dependsOn('findbugsMain')
+    test.dependsOn('spotbugsMain')
 
-    tasks.withType(FindBugs) {
+    tasks.withType(com.github.spotbugs.SpotBugsTask) {
       reports {
-        xml.enabled(project.hasProperty('xmlFindBugsReport'))
-        html.enabled(!project.hasProperty('xmlFindBugsReport'))
+        // Continue supporting `xmlFindBugsReport` for compatibility
+        xml.enabled(project.hasProperty('xmlSpotBugsReport') || project.hasProperty('xmlFindBugsReport'))
+        html.enabled(!project.hasProperty('xmlSpotBugsReport') && !project.hasProperty('xmlFindBugsReport'))
       }
     }
   }
@@ -384,7 +393,7 @@ subprojects {
     apply plugin: "jacoco"
 
     jacoco {
-      toolVersion = "0.8.1"
+      toolVersion = "0.8.2"
     }
 
     // NOTE: Jacoco Gradle plugin does not support "offline instrumentation" this means that classes mocked by PowerMock
@@ -407,7 +416,7 @@ subprojects {
 }
 
 gradle.taskGraph.whenReady { taskGraph ->
-  taskGraph.getAllTasks().findAll { it.name.contains('findbugsScoverage') || it.name.contains('findbugsTest') }.each { task ->
+  taskGraph.getAllTasks().findAll { it.name.contains('spotbugsScoverage') || it.name.contains('spotbugsTest') }.each { task ->
     task.enabled = false
   }
 }
@@ -441,6 +450,12 @@ def fineTuneEclipseClasspathFile(eclipse, project) {
       cp.entries.removeAll { it.kind == "lib" && it.path.matches(".*/build/(classes|resources)/test") }
     }
   }
+}
+
+def checkstyleConfigProperties(configFileName) {
+  [importControlFile: "$rootDir/checkstyle/$configFileName",
+   suppressionsFile: "$rootDir/checkstyle/suppressions.xml",
+   headerFile: "$rootDir/checkstyle/java.header"]
 }
 
 // Aggregates all jacoco results into the root project directory
@@ -551,11 +566,6 @@ project(':core') {
     compile libs.jacksonDatabind
     compile libs.joptSimple
     compile libs.metrics
-
-    // this is required for caffeine
-    compileOnly libs.jsr305
-
-    compile libs.caffeine
     compile libs.scalaLibrary
     // only needed transitively, but set it explicitly to ensure it has the same version as scala-library
     compile libs.scalaReflect
@@ -577,6 +587,9 @@ project(':core') {
     testCompile libs.easymock
     testCompile(libs.apacheda) {
       exclude group: 'xml-apis', module: 'xml-apis'
+      // `mina-core` is a transitive dependency for `apacheds` and `apacheda`.
+      // It is safer to use from `apacheds` since that is the implementation.
+      exclude module: 'mina-core'
     }
     testCompile libs.apachedsCoreApi
     testCompile libs.apachedsInterceptorKerberos
@@ -589,6 +602,7 @@ project(':core') {
     testCompile libs.junit
     testCompile libs.scalatest
     testCompile libs.slf4jlog4j
+    testCompile libs.jfreechart
 
     scoverage libs.scoveragePlugin
     scoverage libs.scoverageRuntime
@@ -709,6 +723,7 @@ project(':core') {
                                'genAdminClientConfigDocs', 'genProducerConfigDocs', 'genConsumerConfigDocs',
                                'genKafkaConfigDocs', 'genTopicConfigDocs',
                                ':connect:runtime:genConnectConfigDocs', ':connect:runtime:genConnectTransformationDocs',
+                               ':connect:runtime:genSinkConnectorConfigDocs', ':connect:runtime:genSourceConnectorConfigDocs',
                                ':streams:genStreamsConfigDocs', 'genConsumerMetricsDocs', 'genProducerMetricsDocs',
                                ':connect:runtime:genConnectMetricsDocs'], type: Tar) {
     classifier = 'site-docs'
@@ -750,12 +765,11 @@ project(':core') {
     from(project(':streams:test-utils').configurations.runtime) { into("libs/") }
     from(project(':streams:examples').jar) { into("libs/") }
     from(project(':streams:examples').configurations.runtime) { into("libs/") }
-    from("$buildDir/dependant-testlibs") { into("testlibs/") }
     duplicatesStrategy 'exclude'
   }
 
   jar {
-    dependsOn('copyDependantLibs', 'copyDependantTestLibs')
+    dependsOn('copyDependantLibs')
   }
 
   jar.manifest {
@@ -769,13 +783,16 @@ project(':core') {
       include('*.jar')
     }
     into "$buildDir/dependant-testlibs"
+    //By default gradle does not handle test dependencies between the sub-projects
+    //This line is to include clients project test jar to dependant-testlibs
+    from (project(':clients').testJar ) { "$buildDir/dependant-testlibs" }
     duplicatesStrategy 'exclude'
   }
 
   systemTestLibs.dependsOn('jar', 'testJar', 'copyDependantTestLibs')
 
   checkstyle {
-    configProperties = [importControlFile: "$rootDir/checkstyle/import-control-core.xml"]
+    configProperties = checkstyleConfigProperties("import-control-core.xml")
   }
 }
 
@@ -791,25 +808,8 @@ project(':examples') {
   }
 
   checkstyle {
-    configProperties = [importControlFile: "$rootDir/checkstyle/import-control-core.xml"]
+    configProperties = checkstyleConfigProperties("import-control-core.xml")
   }
-}
-project(':contrib:kafka-ganglia') {
-  archivesBaseName = "kafka-ganglia"
-
-  dependencies {
-    compile project(':core')
-    compile libs.slf4jlog4j
-    compile "net.sf.jopt-simple:jopt-simple:3.2"
-    compile "com.yammer.metrics:metrics-core:2.2.0"
-    compile "com.yammer.metrics:metrics-ganglia:2.2.0"
-  }
-  task copyToLib( type: Copy ) {
-    into "$buildDir/libs/lib"
-    from configurations.runtime
-  }
-  jar { dependsOn copyToLib }
-  checkstyleMain.exclude '**/kafka/ganglia/**'
 }
 
 project(':clients') {
@@ -1029,9 +1029,11 @@ project(':streams:streams-scala') {
     testCompile project(':core').sourceSets.test.output
     testCompile project(':streams').sourceSets.test.output
     testCompile project(':clients').sourceSets.test.output
+    testCompile project(':streams:test-utils')
 
     testCompile libs.junit
     testCompile libs.scalatest
+    testCompile libs.easymock
 
     testRuntime libs.slf4jlog4j
   }
@@ -1052,6 +1054,7 @@ project(':streams:streams-scala') {
     dependsOn 'copyDependantLibs'
   }
 
+  test.dependsOn(':spotlessScalaCheck')
 }
 
 project(':streams:test-utils') {
@@ -1189,6 +1192,18 @@ project(':streams:upgrade-system-tests-11') {
   }
 }
 
+project(':streams:upgrade-system-tests-20') {
+  archivesBaseName = "kafka-streams-upgrade-system-tests-20"
+
+  dependencies {
+    testCompile libs.kafkaStreams_20
+  }
+
+  systemTestLibs {
+    dependsOn testJar
+  }
+}
+
 project(':jmh-benchmarks') {
 
   apply plugin: 'com.github.johnrengelman.shadow'
@@ -1203,7 +1218,7 @@ project(':jmh-benchmarks') {
     compile project(':clients')
     compile project(':streams')
     compile libs.jmhCore
-    compile libs.jmhGeneratorAnnProcess
+    annotationProcessor libs.jmhGeneratorAnnProcess
     compile libs.jmhCoreBenchmarks
   }
 
@@ -1240,6 +1255,7 @@ project(':log4j-appender') {
 
     testCompile project(':clients').sourceSets.test.output
     testCompile libs.junit
+    testCompile libs.easymock
   }
 
   javadoc {
@@ -1423,6 +1439,20 @@ project(':connect:runtime') {
     main = 'org.apache.kafka.connect.runtime.distributed.DistributedConfig'
     if( !generatedDocsDir.exists() ) { generatedDocsDir.mkdirs() }
     standardOutput = new File(generatedDocsDir, "connect_config.html").newOutputStream()
+  }
+
+  task genSinkConnectorConfigDocs(type: JavaExec) {
+    classpath = sourceSets.main.runtimeClasspath
+    main = 'org.apache.kafka.connect.runtime.SinkConnectorConfig'
+    if( !generatedDocsDir.exists() ) { generatedDocsDir.mkdirs() }
+    standardOutput = new File(generatedDocsDir, "sink_connector_config.html").newOutputStream()
+  }
+
+  task genSourceConnectorConfigDocs(type: JavaExec) {
+    classpath = sourceSets.main.runtimeClasspath
+    main = 'org.apache.kafka.connect.runtime.SourceConnectorConfig'
+    if( !generatedDocsDir.exists() ) { generatedDocsDir.mkdirs() }
+    standardOutput = new File(generatedDocsDir, "source_connector_config.html").newOutputStream()
   }
 
   task genConnectTransformationDocs(type: JavaExec) {

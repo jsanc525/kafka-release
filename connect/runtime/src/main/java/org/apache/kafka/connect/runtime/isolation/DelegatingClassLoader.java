@@ -73,7 +73,12 @@ public class DelegatingClassLoader extends URLClassLoader {
     private final SortedSet<PluginDesc<ConfigProvider>> configProviders;
     private final SortedSet<PluginDesc<ConnectRestExtension>> restExtensions;
     private final List<String> pluginPaths;
-    private final Map<Path, PluginClassLoader> activePaths;
+
+    private static final String MANIFEST_PREFIX = "META-INF/services/";
+    private static final Class[] SERVICE_LOADER_PLUGINS = new Class[] {ConnectRestExtension.class, ConfigProvider.class};
+    private static final Set<String> PLUGIN_MANIFEST_FILES =
+        Arrays.stream(SERVICE_LOADER_PLUGINS).map(serviceLoaderPlugin -> MANIFEST_PREFIX + serviceLoaderPlugin.getName())
+            .collect(Collectors.toSet());
 
     private static final String MANIFEST_PREFIX = "META-INF/services/";
     private static final Class[] SERVICE_LOADER_PLUGINS = new Class[] {ConnectRestExtension.class, ConfigProvider.class};
@@ -86,7 +91,6 @@ public class DelegatingClassLoader extends URLClassLoader {
         this.pluginPaths = pluginPaths;
         this.pluginLoaders = new HashMap<>();
         this.aliases = new HashMap<>();
-        this.activePaths = new HashMap<>();
         this.connectors = new TreeSet<>();
         this.converters = new TreeSet<>();
         this.headerConverters = new TreeSet<>();
@@ -240,10 +244,6 @@ public class DelegatingClassLoader extends URLClassLoader {
         PluginScanResult plugins = scanPluginPath(loader, urls);
         log.info("Registered loader: {}", loader);
         if (!plugins.isEmpty()) {
-            if (loader instanceof PluginClassLoader) {
-                activePaths.put(pluginLocation, (PluginClassLoader) loader);
-            }
-
             addPlugins(plugins.connectors(), loader);
             connectors.addAll(plugins.connectors());
             addPlugins(plugins.converters(), loader);
