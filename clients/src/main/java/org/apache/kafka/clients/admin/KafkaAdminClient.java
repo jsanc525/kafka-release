@@ -2478,17 +2478,6 @@ public class KafkaAdminClient extends AdminClient {
         return false;
     }
 
-    private boolean handleFindCoordinatorError(FindCoordinatorResponse response, KafkaFutureImpl<?> future) {
-        Errors error = response.error();
-        if (error.exception() instanceof RetriableException) {
-            throw error.exception();
-        } else if (response.hasError()) {
-            future.completeExceptionally(error.exception());
-            return true;
-        }
-        return false;
-    }
-
     private final static class ListConsumerGroupsResults {
         private final List<Throwable> errors;
         private final HashMap<String, ConsumerGroupListing> listings;

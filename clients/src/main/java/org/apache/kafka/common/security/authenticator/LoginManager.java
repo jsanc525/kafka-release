@@ -67,7 +67,7 @@ public class LoginManager {
      * and start using {@link #acquireLoginManager(JaasContext, String, Class, Map)}.
      */
     public static LoginManager acquireLoginManager(JaasContext jaasContext, boolean hasKerberos,
-                                                   Map<String, ?> configs) throws IOException, LoginException {
+                                                   Map<String, ?> configs) throws LoginException {
         Class<? extends Login> loginClass = hasKerberos ? KerberosLogin.class : DefaultLogin.class;
         return acquireLoginManager(jaasContext, SaslConfigs.GSSAPI_MECHANISM, loginClass, configs);
     }

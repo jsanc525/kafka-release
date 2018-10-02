@@ -543,26 +543,6 @@ public final class Utils {
     }
 
     /**
-     *  Converts an extensions string into a {@code Map<String, String>}.
-     *
-     *  Example:
-     *      {@code parseMap("key=hey,keyTwo=hi,keyThree=hello", "=", ",") => { key: "hey", keyTwo: "hi", keyThree: "hello" }}
-     *
-     */
-    public static Map<String, String> parseMap(String mapStr, String keyValueSeparator, String elementSeparator) {
-        Map<String, String> map = new HashMap<>();
-
-        if (!mapStr.isEmpty()) {
-            String[] attrvals = mapStr.split(elementSeparator);
-            for (String attrval : attrvals) {
-                String[] array = attrval.split(keyValueSeparator, 2);
-                map.put(array[0], array[1]);
-            }
-        }
-        return map;
-    }
-
-    /**
      * Read a properties file from the given path
      * @param filename The path of the file to read
      */

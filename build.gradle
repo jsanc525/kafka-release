@@ -129,6 +129,8 @@ if (file('.git').exists()) {
         '**/.git/**',
         '**/build/**',
         'CONTRIBUTING.md',
+        'HDP-CHANGES.txt',
+        'HDF-CHANGES.txt',
         'PULL_REQUEST_TEMPLATE.md',
         'gradlew',
         'gradlew.bat',
@@ -567,6 +569,11 @@ project(':core') {
     compile libs.jacksonDatabind
     compile libs.joptSimple
     compile libs.metrics
+
+    // this is required for caffeine
+    compileOnly libs.jsr305
+
+    compile libs.caffeine
     compile libs.scalaLibrary
     // only needed transitively, but set it explicitly to ensure it has the same version as scala-library
     compile libs.scalaReflect
@@ -766,6 +773,7 @@ project(':core') {
     from(project(':streams:test-utils').configurations.runtime) { into("libs/") }
     from(project(':streams:examples').jar) { into("libs/") }
     from(project(':streams:examples').configurations.runtime) { into("libs/") }
+    from("$buildDir/dependant-testlibs") { into("testlibs/") }
     duplicatesStrategy 'exclude'
   }
 
@@ -811,6 +819,24 @@ project(':examples') {
   checkstyle {
     configProperties = checkstyleConfigProperties("import-control-core.xml")
   }
+}
+
+project(':contrib:kafka-ganglia') {
+  archivesBaseName = "kafka-ganglia"
+
+  dependencies {
+    compile project(':core')
+    compile libs.slf4jlog4j
+    compile "net.sf.jopt-simple:jopt-simple:3.2"
+    compile "com.yammer.metrics:metrics-core:2.2.0"
+    compile "com.yammer.metrics:metrics-ganglia:2.2.0"
+  }
+  task copyToLib(type: Copy) {
+    into "$buildDir/libs/lib"
+    from configurations.runtime
+  }
+  jar { dependsOn copyToLib }
+  checkstyleMain.exclude '**/kafka/ganglia/**'
 }
 
 project(':clients') {

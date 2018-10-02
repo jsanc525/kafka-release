@@ -172,7 +172,7 @@ class MetricsTest extends KafkaServerTestHarness with Logging {
     val props: Option[Properties] = Some(properties)
      val records = (0 until nMessages).map(_ => new ProducerRecord[Array[Byte], Array[Byte]](topic,
       new Array[Byte](100 * 1000)))
-    TestUtils.produceMessages(servers, records, produceProps = props)
+    TestUtils.produceMessages(servers, records, producerProps = props)
 
     // Check the log size for each broker so that we can distinguish between failures caused by replication issues
     // versus failures caused by the metrics
@@ -188,7 +188,7 @@ class MetricsTest extends KafkaServerTestHarness with Logging {
     val initialMessagesIn = meterCount(messagesInMetricName)
 
     // Produce a few messages to make the metrics tick
-    TestUtils.produceMessages(servers, records, produceProps = props)
+    TestUtils.produceMessages(servers, records, producerProps = props)
 
     val recvdMsgsIn = meterCount(messagesInMetricName)
 

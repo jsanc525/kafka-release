@@ -635,10 +635,6 @@ public class KafkaStreams {
         this.config = config;
         this.time = time;
 
-        // adjust the topology if optimization is turned on.
-        // TODO: to be removed post 2.0
-        internalTopologyBuilder.adjust(config);
-
         // The application ID is a required config and hence should always have value
         processId = UUID.randomUUID();
         final String userClientId = config.getString(StreamsConfig.CLIENT_ID_CONFIG);

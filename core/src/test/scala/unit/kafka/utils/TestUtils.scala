@@ -539,8 +539,10 @@ object TestUtils extends Logging {
                            trustStoreFile: Option[File] = None,
                            saslProperties: Option[Properties] = None,
                            keySerializer: Serializer[K] = new ByteArraySerializer,
-                           valueSerializer: Serializer[V] = new ByteArraySerializer): KafkaProducer[K, V] = {
-    val producerProps = new Properties
+                           valueSerializer: Serializer[V] = new ByteArraySerializer,
+                           props: Option[Properties] = None): KafkaProducer[K, V] = {
+
+    val producerProps = props.getOrElse(new Properties)
     producerProps.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, brokerList)
     producerProps.put(ProducerConfig.ACKS_CONFIG, acks.toString)
     producerProps.put(ProducerConfig.MAX_BLOCK_MS_CONFIG, maxBlockMs.toString)
@@ -584,8 +586,11 @@ object TestUtils extends Logging {
                            trustStoreFile: Option[File] = None,
                            saslProperties: Option[Properties] = None,
                            keyDeserializer: Deserializer[K] = new ByteArrayDeserializer,
-                           valueDeserializer: Deserializer[V] = new ByteArrayDeserializer): KafkaConsumer[K, V] = {
-    val consumerProps = new Properties
+                           valueDeserializer: Deserializer[V] = new ByteArrayDeserializer,
+                           props: Option[Properties] = None): KafkaConsumer[K, V] = {
+    import org.apache.kafka.clients.consumer.ConsumerConfig
+
+    val consumerProps = props.getOrElse(new Properties())
     consumerProps.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, brokerList)
     consumerProps.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, autoOffsetReset)
     consumerProps.put(ConsumerConfig.GROUP_ID_CONFIG, groupId)
@@ -916,8 +921,9 @@ object TestUtils extends Logging {
 
   def produceMessages(servers: Seq[KafkaServer],
                       records: Seq[ProducerRecord[Array[Byte], Array[Byte]]],
-                      acks: Int = -1): Unit = {
-    val producer = createProducer(TestUtils.getBrokerListStrFromServers(servers), acks = acks)
+                      acks: Int = -1,
+                      producerProps: Option[Properties] = None): Unit = {
+    val producer = createProducer(TestUtils.getBrokerListStrFromServers(servers), acks = acks, props=producerProps)
     try {
       val futures = records.map(producer.send)
       futures.foreach(_.get)

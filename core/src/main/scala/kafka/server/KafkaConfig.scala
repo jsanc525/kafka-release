@@ -203,6 +203,10 @@ object Defaults {
   val MetricReporterClasses = ""
   val MetricRecordingLevel = Sensor.RecordingLevel.INFO.toString()
 
+  /** ********* Producer Metrics Configuration ***********/
+  val ProducerMetricssEnable = false
+  val ProducerMetricsCacheMaxSize = 1000
+  val ProducerMetricsCacheEntryExpiryMs = 5*60*1000
 
   /** ********* Kafka Yammer Metrics Reporter Configuration ***********/
   val KafkaMetricReporterClasses = ""
@@ -414,6 +418,11 @@ object KafkaConfig {
   val MetricNumSamplesProp: String = CommonClientConfigs.METRICS_NUM_SAMPLES_CONFIG
   val MetricReporterClassesProp: String = CommonClientConfigs.METRIC_REPORTER_CLASSES_CONFIG
   val MetricRecordingLevelProp: String = CommonClientConfigs.METRICS_RECORDING_LEVEL_CONFIG
+
+  /** ********* Producer Metrics Configuration ***********/
+  val ProducerMetricsEnableProp = "producer.metrics.enable"
+  val ProducerMetricsCacheMaxSizeProp = "producer.metrics.cache.max.size"
+  val ProducerMetricsCacheEntryExpiryMsProp = "producer.metrics.cache.entry.expiration.ms"
 
   /** ********* Kafka Yammer Metrics Reporters Configuration ***********/
   val KafkaMetricsReporterClassesProp = "kafka.metrics.reporters"
@@ -729,6 +738,11 @@ object KafkaConfig {
   val MetricReporterClassesDoc = CommonClientConfigs.METRIC_REPORTER_CLASSES_DOC
   val MetricRecordingLevelDoc = CommonClientConfigs.METRICS_RECORDING_LEVEL_DOC
 
+  /** ********* Producer Metrics Configuration ***********/
+  val ProducerMetricsEnableDoc = "Enables capturing producer metrics and cache them."
+  val ProducerMetricCacheMaxSizeDoc = "Maximum size of producer metric cache in broker. When it reaches maximum size it " +
+    "invalidates existing entries which were expired based on producer.metric.cache.entry.expiration.ms value"
+  val ProducerMetricCacheEntryExpiryMsDoc = "Maximum time of an entry that can exist in the cache before it is accessed from or after it is written into."
 
   /** ********* Kafka Yammer Metrics Reporter Configuration ***********/
   val KafkaMetricsReporterClassesDoc = "A list of classes to use as Yammer metrics custom reporters." +
@@ -964,6 +978,11 @@ object KafkaConfig {
       .define(MetricSampleWindowMsProp, LONG, Defaults.MetricSampleWindowMs, atLeast(1), LOW, MetricSampleWindowMsDoc)
       .define(MetricReporterClassesProp, LIST, Defaults.MetricReporterClasses, LOW, MetricReporterClassesDoc)
       .define(MetricRecordingLevelProp, STRING, Defaults.MetricRecordingLevel, LOW, MetricRecordingLevelDoc)
+
+      /** ********* Producer Metrics Configuration ***********/
+      .define(ProducerMetricsEnableProp, BOOLEAN, Defaults.ProducerMetricssEnable, LOW, ProducerMetricsEnableDoc)
+      .define(ProducerMetricsCacheMaxSizeProp, INT, Defaults.ProducerMetricsCacheMaxSize, atLeast(1), LOW, ProducerMetricCacheMaxSizeDoc)
+      .define(ProducerMetricsCacheEntryExpiryMsProp, LONG, Defaults.ProducerMetricsCacheEntryExpiryMs, atLeast(1), LOW, ProducerMetricCacheEntryExpiryMsDoc)
 
       /** ********* Kafka Yammer Metrics Reporter Configuration for docs ***********/
       .define(KafkaMetricsReporterClassesProp, LIST, Defaults.KafkaMetricReporterClasses, LOW, KafkaMetricsReporterClassesDoc)
@@ -1250,6 +1269,11 @@ class KafkaConfig(val props: java.util.Map[_, _], doLog: Boolean, dynamicConfigO
     else
       Set.empty[String]
   }
+
+  /** ********* Producer metrics configuration **************/
+  val producerMetricsEnable = getBoolean(KafkaConfig.ProducerMetricsEnableProp)
+  val producerMetricsCacheSize = getInt(KafkaConfig.ProducerMetricsCacheMaxSizeProp)
+  val producerMetricsCacheExpiryMs = getLong(KafkaConfig.ProducerMetricsCacheEntryExpiryMsProp)
 
   def interBrokerListenerName = getInterBrokerListenerNameAndSecurityProtocol._1
   def interBrokerSecurityProtocol = getInterBrokerListenerNameAndSecurityProtocol._2
