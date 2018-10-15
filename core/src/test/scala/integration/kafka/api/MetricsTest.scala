@@ -229,7 +229,7 @@ class MetricsTest extends IntegrationTestHarness with SaslSetup {
 
     try {
       val consumer = createConsumer()
-      consumer.partitionsFor("12{}!")
+      consumer.partitionsFor("12 {}!")
     } catch {
       case _: InvalidTopicException => // expected
     }
