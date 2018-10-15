@@ -19,6 +19,7 @@ package org.apache.kafka.streams.kstream.internals;
 import org.apache.kafka.common.serialization.Serde;
 import org.apache.kafka.common.utils.Bytes;
 import org.apache.kafka.streams.KeyValue;
+import org.apache.kafka.streams.kstream.Grouped;
 import org.apache.kafka.streams.kstream.KGroupedTable;
 import org.apache.kafka.streams.kstream.KStream;
 import org.apache.kafka.streams.kstream.KTable;
@@ -35,13 +36,15 @@ import org.apache.kafka.streams.kstream.Windowed;
 import org.apache.kafka.streams.kstream.internals.graph.KTableKTableJoinNode;
 import org.apache.kafka.streams.kstream.internals.graph.ProcessorGraphNode;
 import org.apache.kafka.streams.kstream.internals.graph.ProcessorParameters;
+import org.apache.kafka.streams.kstream.internals.graph.StatefulProcessorNode;
 import org.apache.kafka.streams.kstream.internals.graph.StreamsGraphNode;
 import org.apache.kafka.streams.kstream.internals.graph.TableProcessorNode;
 import org.apache.kafka.streams.kstream.internals.suppress.FinalResultsSuppressionBuilder;
 import org.apache.kafka.streams.kstream.internals.suppress.KTableSuppressProcessor;
-import org.apache.kafka.streams.kstream.internals.suppress.SuppressedImpl;
+import org.apache.kafka.streams.kstream.internals.suppress.SuppressedInternal;
 import org.apache.kafka.streams.processor.ProcessorSupplier;
 import org.apache.kafka.streams.state.KeyValueStore;
+import org.apache.kafka.streams.state.internals.InMemoryTimeOrderedKeyValueBuffer;
 
 import java.time.Duration;
 import java.util.Collections;
@@ -353,23 +356,30 @@ public class KTableImpl<K, S, V> extends AbstractStream<K, V> implements KTable<
     }
 
     @Override
-    public KTable<K, V> suppress(final Suppressed<K> suppressed) {
-        final String name = builder.newProcessorName(SUPPRESS_NAME);
+    public KTable<K, V> suppress(final Suppressed<? super K> suppressed) {
+        final SuppressedInternal<K> suppressedInternal = buildSuppress(suppressed);
 
-        // TODO: follow-up pr to forward the k/v serdes
+        final String name =
+            suppressedInternal.name() != null ? suppressedInternal.name() : builder.newProcessorName(SUPPRESS_NAME);
+
+        final String storeName =
+            suppressedInternal.name() != null ? suppressedInternal.name() + "-store" : builder.newStoreName(SUPPRESS_NAME);
+
         final ProcessorSupplier<K, Change<V>> suppressionSupplier =
             () -> new KTableSuppressProcessor<>(
-                buildSuppress(suppressed),
-                null,
-                null
+                suppressedInternal,
+                storeName,
+                keySerde,
+                valSerde == null ? null : new FullChangeSerde<>(valSerde)
             );
 
-        final ProcessorParameters<K, Change<V>> processorParameters = new ProcessorParameters<>(
-            suppressionSupplier,
-            name
-        );
 
-        final ProcessorGraphNode<K, Change<V>> node = new ProcessorGraphNode<>(name, processorParameters, false);
+        final ProcessorGraphNode<K, Change<V>> node = new StatefulProcessorNode<>(
+            name,
+            new ProcessorParameters<>(suppressionSupplier, name),
+            new InMemoryTimeOrderedKeyValueBuffer.Builder(storeName),
+            false
+        );
 
         builder.addGraphNode(streamsGraphNode, node);
 
@@ -387,18 +397,18 @@ public class KTableImpl<K, S, V> extends AbstractStream<K, V> implements KTable<
     }
 
     @SuppressWarnings("unchecked")
-    private SuppressedImpl<K> buildSuppress(final Suppressed<K> suppress) {
+    private SuppressedInternal<K> buildSuppress(final Suppressed<? super K> suppress) {
         if (suppress instanceof FinalResultsSuppressionBuilder) {
             final long grace = findAndVerifyWindowGrace(streamsGraphNode);
 
             final FinalResultsSuppressionBuilder<?> builder = (FinalResultsSuppressionBuilder) suppress;
 
-            final SuppressedImpl<? extends Windowed> finalResultsSuppression =
+            final SuppressedInternal<? extends Windowed> finalResultsSuppression =
                 builder.buildFinalResultsSuppression(Duration.ofMillis(grace));
 
-            return (SuppressedImpl<K>) finalResultsSuppression;
-        } else if (suppress instanceof SuppressedImpl) {
-            return (SuppressedImpl<K>) suppress;
+            return (SuppressedInternal<K>) finalResultsSuppression;
+        } else if (suppress instanceof SuppressedInternal) {
+            return (SuppressedInternal<K>) suppress;
         } else {
             throw new IllegalArgumentException("Custom subclasses of Suppressed are not allowed.");
         }
@@ -552,14 +562,24 @@ public class KTableImpl<K, S, V> extends AbstractStream<K, V> implements KTable<
 
     @Override
     public <K1, V1> KGroupedTable<K1, V1> groupBy(final KeyValueMapper<? super K, ? super V, KeyValue<K1, V1>> selector) {
-        return groupBy(selector, Serialized.with(null, null));
+        return groupBy(selector, Grouped.with(null, null));
     }
 
     @Override
+    @Deprecated
     public <K1, V1> KGroupedTable<K1, V1> groupBy(final KeyValueMapper<? super K, ? super V, KeyValue<K1, V1>> selector,
                                                   final Serialized<K1, V1> serialized) {
         Objects.requireNonNull(selector, "selector can't be null");
         Objects.requireNonNull(serialized, "serialized can't be null");
+        final SerializedInternal<K1, V1> serializedInternal = new SerializedInternal<>(serialized);
+        return groupBy(selector, Grouped.with(serializedInternal.keySerde(), serializedInternal.valueSerde()));
+    }
+
+    @Override
+    public <K1, V1> KGroupedTable<K1, V1> groupBy(final KeyValueMapper<? super K, ? super V, KeyValue<K1, V1>> selector,
+                                                  final Grouped<K1, V1> grouped) {
+        Objects.requireNonNull(selector, "selector can't be null");
+        Objects.requireNonNull(grouped, "grouped can't be null");
         final String selectName = builder.newProcessorName(SELECT_NAME);
 
         final KTableProcessorSupplier<K, V, KeyValue<K1, V1>> selectSupplier = new KTableRepartitionMap<>(this, selector);
@@ -571,17 +591,12 @@ public class KTableImpl<K, S, V> extends AbstractStream<K, V> implements KTable<
         builder.addGraphNode(this.streamsGraphNode, groupByMapNode);
 
         this.enableSendingOldValues();
-
-        final SerializedInternal<K1, V1> serializedInternal = new SerializedInternal<>(serialized);
-
-        // we cannot inherit parent key and value serdes since both of them may have changed;
-        // we can only inherit from what serialized specified here
+        final GroupedInternal<K1, V1> groupedInternal = new GroupedInternal<>(grouped);
         return new KGroupedTableImpl<>(
             builder,
             selectName,
             sourceNodes,
-            serializedInternal.keySerde(),
-            serializedInternal.valueSerde(),
+            groupedInternal,
             groupByMapNode
         );
     }
