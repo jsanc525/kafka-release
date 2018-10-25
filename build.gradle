@@ -838,6 +838,7 @@ project(':clients') {
 
     testRuntime libs.slf4jlog4j
     testRuntime libs.jacksonDatabind
+    testCompile libs.mockitoCore
   }
 
   task determineCommitId {
