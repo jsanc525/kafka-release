@@ -216,6 +216,26 @@ class BrokerEndPointTest {
     assertEquals("PLAINTEXT://MyHostname:9092", endpoint.connectionString)
   }
 
+  @Test
+  def testPLAINTEXTSASLConversion(): Unit = {
+      val json = """{
+      "version":4,
+      "host":"localhost",
+      "port":9092,
+      "jmx_port":9999,
+      "timestamp":"2233345666",
+      "endpoints":["PLAINTEXTSASL://host1:9092", "PLAINTEXT://host1:9093"],
+      "listener_security_protocol_map":{"PLAINTEXTSASL":"PLAINTEXTSASL", "PLAINTEXT":"PLAINTEXT"},
+      "rack":null
+    }"""
+      val broker = parseBrokerJson(1, json)
+      assertEquals(1, broker.id)
+      val brokerEndPoint = broker.brokerEndPoint(new ListenerName(SecurityProtocol.SASL_PLAINTEXT.name))
+      assertEquals("host1", brokerEndPoint.host)
+      assertEquals(9092, brokerEndPoint.port)
+      assertEquals(None, broker.rack)
+  }
+
   private def parseBrokerJson(id: Int, jsonString: String): Broker =
     BrokerIdZNode.decode(id, jsonString.getBytes(StandardCharsets.UTF_8)).broker
 }

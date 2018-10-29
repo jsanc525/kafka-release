@@ -111,6 +111,8 @@ object BrokerIdZNode {
   private val ListenerSecurityProtocolMapKey = "listener_security_protocol_map"
   private val TimestampKey = "timestamp"
 
+  private val PlaintextSasl = "PLAINTEXTSASL"
+
   def path(id: Int) = s"${BrokerIdsZNode.path}/$id"
 
   /**
@@ -217,10 +219,13 @@ object BrokerIdZNode {
           else {
             val securityProtocolMap = brokerInfo.get(ListenerSecurityProtocolMapKey).map(
               _.to[Map[String, String]].map { case (listenerName, securityProtocol) =>
-                new ListenerName(listenerName) -> SecurityProtocol.forName(securityProtocol)
+                val newListenerName = listenerName.replaceFirst(PlaintextSasl, SecurityProtocol.SASL_PLAINTEXT.name)
+                val newSecurityProtocol = securityProtocol.replaceFirst(PlaintextSasl, SecurityProtocol.SASL_PLAINTEXT.name)
+                new ListenerName(newListenerName) -> SecurityProtocol.forName(newSecurityProtocol)
               })
             val listeners = brokerInfo(EndpointsKey).to[Seq[String]]
-            listeners.map(EndPoint.createEndPoint(_, securityProtocolMap))
+            listeners.map(_.replaceFirst(PlaintextSasl, SecurityProtocol.SASL_PLAINTEXT.name))
+              .map(EndPoint.createEndPoint(_, securityProtocolMap))
           }
 
         val rack = brokerInfo.get(RackKey).flatMap(_.to[Option[String]])
