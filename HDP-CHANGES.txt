@@ -1,3 +1,2 @@
-Changes only in Hortonworks github and not in Apache Kafka release 0.10.1.1 and hence not covered in releaes notes https://archive.apache.org/dist/kafka/0.10.1.1/RELEASE_NOTES.html.
+Changes only in Hortonworks github and not in Apache Kafka release 2.0 and hence not covered in releaes notes https://www.apache.org/dist/kafka/2.0.0/RELEASE_NOTES.html
 
- * KAFKA-4360: Controller may deadLock when autoLeaderRebalance encounter zk expired
