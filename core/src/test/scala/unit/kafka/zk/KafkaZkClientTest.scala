@@ -57,18 +57,23 @@ class KafkaZkClientTest extends ZooKeeperTestHarness {
   val topicPartitions10_11 = Seq(topicPartition10, topicPartition11)
 
   var otherZkClient: KafkaZkClient = _
+  var expiredSessionZkClient: ExpiredKafkaZkClient = _
 
   @Before
   override def setUp(): Unit = {
     super.setUp()
     otherZkClient = KafkaZkClient(zkConnect, zkAclsEnabled.getOrElse(JaasUtils.isZkSecurityEnabled), zkSessionTimeout,
       zkConnectionTimeout, zkMaxInFlightRequests, Time.SYSTEM)
+    expiredSessionZkClient = ExpiredKafkaZkClient(zkConnect, zkAclsEnabled.getOrElse(JaasUtils.isZkSecurityEnabled),
+      zkSessionTimeout, zkConnectionTimeout, zkMaxInFlightRequests, Time.SYSTEM)
   }
 
   @After
   override def tearDown(): Unit = {
     if (otherZkClient != null)
       otherZkClient.close()
+    if (expiredSessionZkClient != null)
+      expiredSessionZkClient.close()
     super.tearDown()
   }
 
@@ -646,6 +651,31 @@ class KafkaZkClientTest extends ZooKeeperTestHarness {
   }
 
   @Test
+  def testRetryRegisterBrokerInfo(): Unit = {
+    val brokerId = 5
+    val brokerPort = 9999
+    val brokerHost = "test.host"
+    val expiredBrokerInfo = createBrokerInfo(brokerId, brokerHost, brokerPort, SecurityProtocol.PLAINTEXT)
+    expiredSessionZkClient.createTopLevelPaths()
+
+    // Register the broker, for the first time
+    expiredSessionZkClient.registerBrokerInZk(expiredBrokerInfo)
+    assertEquals(Some(expiredBrokerInfo.broker), expiredSessionZkClient.getBroker(brokerId))
+    val originalCzxid = expiredSessionZkClient.getPathCzxid(BrokerIdZNode.path(brokerId))
+
+    // Here, the node exists already, when trying to register under a different session id,
+    // the node will be deleted and created again using the new session id.
+    expiredSessionZkClient.registerBrokerInZk(expiredBrokerInfo)
+
+    // The broker info should be the same, no error should be raised
+    assertEquals(Some(expiredBrokerInfo.broker), expiredSessionZkClient.getBroker(brokerId))
+    val newCzxid = expiredSessionZkClient.getPathCzxid(BrokerIdZNode.path(brokerId))
+
+    assertNotEquals("The Czxid of original ephemeral znode should be different " +
+      "from the new ephemeral znode Czxid", originalCzxid, newCzxid)
+  }
+
+  @Test
   def testGetBrokerMethods(): Unit = {
     zkClient.createTopLevelPaths()
 
@@ -1060,5 +1090,35 @@ class KafkaZkClientTest extends ZooKeeperTestHarness {
     val actualConsumerGroupOffsetsPath = ConsumerOffset.path(consumerGroup, topic, partition)
 
     assertEquals(expectedConsumerGroupOffsetsPath, actualConsumerGroupOffsetsPath)
+  }
+
+  class ExpiredKafkaZkClient private (zooKeeperClient: ZooKeeperClient, isSecure: Boolean, time: Time)
+    extends KafkaZkClient(zooKeeperClient, isSecure, time) {
+    // Overwriting this method from the parent class to force the client to re-register the Broker.
+    override def shouldReCreateEphemeralZNode(ephemeralOwnerId: Long): Boolean = {
+      true
+    }
+
+    def getPathCzxid(path: String): Long = {
+      val getDataRequest = GetDataRequest(path)
+      val getDataResponse = retryRequestUntilConnected(getDataRequest)
+
+      getDataResponse.stat.getCzxid
+    }
+  }
+
+  private object ExpiredKafkaZkClient {
+    def apply(connectString: String,
+              isSecure: Boolean,
+              sessionTimeoutMs: Int,
+              connectionTimeoutMs: Int,
+              maxInFlightRequests: Int,
+              time: Time,
+              metricGroup: String = "kafka.server",
+              metricType: String = "SessionExpireListener") = {
+      val zooKeeperClient = new ZooKeeperClient(connectString, sessionTimeoutMs, connectionTimeoutMs, maxInFlightRequests,
+        time, metricGroup, metricType)
+      new ExpiredKafkaZkClient(zooKeeperClient, isSecure, time)
+    }
   }
 }
