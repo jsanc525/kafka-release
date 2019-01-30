@@ -16,6 +16,7 @@
  */
 package org.apache.kafka.common.network;
 
+import java.net.SocketAddress;
 import org.apache.kafka.common.errors.AuthenticationException;
 import org.apache.kafka.common.memory.MemoryPool;
 import org.apache.kafka.common.security.auth.KafkaPrincipal;
@@ -25,6 +26,7 @@ import java.io.IOException;
 import java.net.InetAddress;
 import java.net.Socket;
 import java.nio.channels.SelectionKey;
+import java.nio.channels.SocketChannel;
 import java.util.Objects;
 
 public class KafkaChannel {
@@ -48,7 +50,7 @@ public class KafkaChannel {
         MUTED_AND_RESPONSE_PENDING,
         MUTED_AND_THROTTLED,
         MUTED_AND_THROTTLED_AND_RESPONSE_PENDING
-    };
+    }
 
     /** Socket server events that will change the mute state:
      * <ul>
@@ -72,7 +74,7 @@ public class KafkaChannel {
         RESPONSE_SENT,
         THROTTLE_STARTED,
         THROTTLE_ENDED
-    };
+    }
 
     private final String id;
     private final TransportLayer transportLayer;
@@ -89,8 +91,9 @@ public class KafkaChannel {
     private boolean disconnected;
     private ChannelMuteState muteState;
     private ChannelState state;
+    private SocketAddress remoteAddress;
 
-    public KafkaChannel(String id, TransportLayer transportLayer, Authenticator authenticator, int maxReceiveSize, MemoryPool memoryPool) throws IOException {
+    public KafkaChannel(String id, TransportLayer transportLayer, Authenticator authenticator, int maxReceiveSize, MemoryPool memoryPool) {
         this.id = id;
         this.transportLayer = transportLayer;
         this.authenticator = authenticator;
@@ -120,15 +123,23 @@ public class KafkaChannel {
      * authentication. For SASL, authentication is performed by {@link Authenticator#authenticate()}.
      */
     public void prepare() throws AuthenticationException, IOException {
+        boolean authenticating = false;
         try {
             if (!transportLayer.ready())
                 transportLayer.handshake();
-            if (transportLayer.ready() && !authenticator.complete())
+            if (transportLayer.ready() && !authenticator.complete()) {
+                authenticating = true;
                 authenticator.authenticate();
+            }
         } catch (AuthenticationException e) {
             // Clients are notified of authentication exceptions to enable operations to be terminated
             // without retries. Other errors are handled as network exceptions in Selector.
-            state = new ChannelState(ChannelState.State.AUTHENTICATION_FAILED, e);
+            String remoteDesc = remoteAddress != null ? remoteAddress.toString() : null;
+            state = new ChannelState(ChannelState.State.AUTHENTICATION_FAILED, e, remoteDesc);
+            if (authenticating) {
+                delayCloseOnAuthenticationFailure();
+                throw new DelayedResponseAuthenticationException(e);
+            }
             throw e;
         }
         if (ready())
@@ -137,6 +148,10 @@ public class KafkaChannel {
 
     public void disconnect() {
         disconnected = true;
+        if (state == ChannelState.NOT_CONNECTED && remoteAddress != null) {
+            //if we captured the remote address we can provide more information
+            state = new ChannelState(ChannelState.State.NOT_CONNECTED, remoteAddress.toString());
+        }
         transportLayer.disconnect();
     }
 
@@ -149,9 +164,22 @@ public class KafkaChannel {
     }
 
     public boolean finishConnect() throws IOException {
+        //we need to grab remoteAddr before finishConnect() is called otherwise
+        //it becomes inaccessible if the connection was refused.
+        SocketChannel socketChannel = transportLayer.socketChannel();
+        if (socketChannel != null) {
+            remoteAddress = socketChannel.getRemoteAddress();
+        }
         boolean connected = transportLayer.finishConnect();
-        if (connected)
-            state = ready() ? ChannelState.READY : ChannelState.AUTHENTICATE;
+        if (connected) {
+            if (ready()) {
+                state = ChannelState.READY;
+            } else if (remoteAddress != null) {
+                state = new ChannelState(ChannelState.State.AUTHENTICATE, remoteAddress.toString());
+            } else {
+                state = ChannelState.AUTHENTICATE;
+            }
+        }
         return connected;
     }
 
@@ -234,6 +262,24 @@ public class KafkaChannel {
 
     public ChannelMuteState muteState() {
         return muteState;
+    }
+
+    /**
+     * Delay channel close on authentication failure. This will remove all read/write operations from the channel until
+     * {@link #completeCloseOnAuthenticationFailure()} is called to finish up the channel close.
+     */
+    private void delayCloseOnAuthenticationFailure() {
+        transportLayer.removeInterestOps(SelectionKey.OP_WRITE);
+    }
+
+    /**
+     * Finish up any processing on {@link #prepare()} failure.
+     * @throws IOException
+     */
+    void completeCloseOnAuthenticationFailure() throws IOException {
+        transportLayer.addInterestOps(SelectionKey.OP_WRITE);
+        // Invoke the underlying handler to finish up any processing on authentication failure
+        authenticator.handleAuthenticationFailure();
     }
 
     /**

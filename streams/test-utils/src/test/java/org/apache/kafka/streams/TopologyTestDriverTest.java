@@ -16,6 +16,7 @@
  */
 package org.apache.kafka.streams;
 
+import java.time.Duration;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.header.Header;
@@ -54,6 +55,7 @@ import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
@@ -63,9 +65,11 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Properties;
 import java.util.Set;
-import java.util.Arrays;
 import java.util.regex.Pattern;
 
+import static org.apache.kafka.common.utils.Utils.mkEntry;
+import static org.apache.kafka.common.utils.Utils.mkMap;
+import static org.apache.kafka.common.utils.Utils.mkProperties;
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
@@ -97,13 +101,11 @@ public class TopologyTestDriverTest {
     private final ConsumerRecord<byte[], byte[]> consumerRecord2 = consumerRecordFactory.create(SOURCE_TOPIC_2, key2, value2, timestamp2);
 
     private TopologyTestDriver testDriver;
-    private final Properties config = new Properties() {
-        {
-            put(StreamsConfig.APPLICATION_ID_CONFIG, "test-TopologyTestDriver");
-            put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, "dummy:1234");
-            put(StreamsConfig.STATE_DIR_CONFIG, TestUtils.tempDirectory().getAbsolutePath());
-        }
-    };
+    private final Properties config = mkProperties(mkMap(
+        mkEntry(StreamsConfig.APPLICATION_ID_CONFIG, "test-TopologyTestDriver"),
+        mkEntry(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, "dummy:1234"),
+        mkEntry(StreamsConfig.STATE_DIR_CONFIG, TestUtils.tempDirectory().getAbsolutePath())
+    ));
     private KeyValueStore<String, Long> store;
 
     private final StringDeserializer stringDeserializer = new StringDeserializer();
@@ -230,7 +232,7 @@ public class TopologyTestDriverTest {
             initialized = true;
             this.context = context;
             for (final Punctuation punctuation : punctuations) {
-                this.context.schedule(punctuation.intervalMs, punctuation.punctuationType, punctuation.callback);
+                this.context.schedule(Duration.ofMillis(punctuation.intervalMs), punctuation.punctuationType, punctuation.callback);
             }
         }
 
@@ -862,8 +864,8 @@ public class TopologyTestDriverTest {
         @Override
         public void init(final ProcessorContext context) {
             this.context = context;
-            context.schedule(60000, PunctuationType.WALL_CLOCK_TIME, timestamp -> flushStore());
-            context.schedule(10000, PunctuationType.STREAM_TIME, timestamp -> flushStore());
+            context.schedule(Duration.ofMinutes(1), PunctuationType.WALL_CLOCK_TIME, timestamp -> flushStore());
+            context.schedule(Duration.ofSeconds(10), PunctuationType.STREAM_TIME, timestamp -> flushStore());
             store = (KeyValueStore<String, Long>) context.getStateStore("aggStore");
         }
 

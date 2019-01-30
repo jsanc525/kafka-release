@@ -19,15 +19,14 @@ package kafka.server
 
 import java.util
 import java.util.Objects
-
-import kafka.network._
-import kafka.utils._
-import kafka.metrics.KafkaMetricsGroup
-import java.util.concurrent.{ConcurrentHashMap, CountDownLatch, TimeUnit}
+import java.util.concurrent._
 import java.util.concurrent.atomic.AtomicInteger
 
 import com.github.benmanes.caffeine.cache._
 import com.yammer.metrics.core.Meter
+import kafka.metrics.KafkaMetricsGroup
+import kafka.network._
+import kafka.utils._
 import org.apache.kafka.common.TopicPartition
 import org.apache.kafka.common.internals.FatalExitError
 import org.apache.kafka.common.utils.{KafkaThread, Time}
@@ -229,6 +228,21 @@ class ProducerStats(producerCacheMaxSize: Int, producerCacheExpiryMs: Long) exte
     .initialCapacity(producerCacheMaxSize/2)
     .removalListener(removalListener)
     .build(cacheLoader)
+
+  // clears cache every 5 mins as caffeine cache does not guarantee to remove entries as soon as expired.
+  // This gives deterministic behavior about producers considered to be inactive as those metrics are removed.
+  Executors.newScheduledThreadPool(1, new ThreadFactory {
+    override def newThread(r: Runnable): Thread = {
+      val thread = Executors.defaultThreadFactory().newThread(r)
+      thread.setName("client-topic-metrics-cache-cleanup-thread")
+      thread.setDaemon(true)
+      thread
+    }
+  }).scheduleWithFixedDelay(new Runnable {
+    override def run(): Unit = {
+      clientTopicPartitions.cleanUp()
+    }
+  }, 5, 300, TimeUnit.SECONDS)
 
   def clientMetrics(clientId:String, topicPartition: TopicPartition): BrokerClientMetrics = {
     Objects.requireNonNull(topicPartition, "topicPartition can not be null")

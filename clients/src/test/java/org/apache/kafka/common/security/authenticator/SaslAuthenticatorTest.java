@@ -92,6 +92,8 @@ import org.apache.kafka.common.security.auth.AuthenticateCallbackHandler;
 import org.apache.kafka.common.security.authenticator.TestDigestLoginModule.DigestServerCallbackHandler;
 import org.apache.kafka.common.security.plain.internals.PlainServerCallbackHandler;
 
+import org.apache.kafka.common.utils.Time;
+import org.apache.kafka.common.utils.Utils;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -107,6 +109,7 @@ import static org.junit.Assert.fail;
 public class SaslAuthenticatorTest {
 
     private static final int BUFFER_SIZE = 4 * 1024;
+    private static Time time = Time.SYSTEM;
 
     private NioEchoServer server;
     private Selector selector;
@@ -828,7 +831,7 @@ public class SaslAuthenticatorTest {
         SecurityProtocol securityProtocol = SecurityProtocol.SASL_PLAINTEXT;
         TestJaasConfig jaasConfig = configureMechanisms("PLAIN", Collections.singletonList("PLAIN"));
         jaasConfig.createOrUpdateEntry(TestJaasConfig.LOGIN_CONTEXT_CLIENT, TestPlainLoginModule.class.getName(),
-                Collections.<String, Object>emptyMap());
+                Collections.emptyMap());
         server = createEchoServer(securityProtocol);
 
         // Connection should succeed using login callback override that sets correct username/password
@@ -852,7 +855,7 @@ public class SaslAuthenticatorTest {
         SecurityProtocol securityProtocol = SecurityProtocol.SASL_PLAINTEXT;
         TestJaasConfig jaasConfig = configureMechanisms("PLAIN", Collections.singletonList("PLAIN"));
         jaasConfig.createOrUpdateEntry(TestJaasConfig.LOGIN_CONTEXT_SERVER, TestPlainLoginModule.class.getName(),
-                Collections.<String, Object>emptyMap());
+                Collections.emptyMap());
         jaasConfig.setClientOptions("PLAIN", TestServerCallbackHandler.USERNAME, TestServerCallbackHandler.PASSWORD);
         ListenerName listenerName = ListenerName.forSecurityProtocol(securityProtocol);
         String prefix = listenerName.saslMechanismConfigPrefix("PLAIN");
@@ -994,7 +997,7 @@ public class SaslAuthenticatorTest {
                 TestJaasConfig.jaasConfigProperty("PLAIN", serverOptions));
         TestJaasConfig staticJaasConfig = new TestJaasConfig();
         staticJaasConfig.createOrUpdateEntry(TestJaasConfig.LOGIN_CONTEXT_SERVER, PlainLoginModule.class.getName(),
-                Collections.<String, Object>emptyMap());
+                Collections.emptyMap());
         staticJaasConfig.setClientOptions("PLAIN", "user1", "user1-secret");
         Configuration.setConfiguration(staticJaasConfig);
         server = createEchoServer(securityProtocol);
@@ -1206,6 +1209,40 @@ public class SaslAuthenticatorTest {
     }
 
     /**
+     * Tests OAUTHBEARER client channels without tokens for the server.
+     */
+    @Test
+    public void testValidSaslOauthBearerMechanismWithoutServerTokens() throws Exception {
+        String node = "0";
+        SecurityProtocol securityProtocol = SecurityProtocol.SASL_SSL;
+        saslClientConfigs.put(SaslConfigs.SASL_MECHANISM, "OAUTHBEARER");
+        saslServerConfigs.put(BrokerSecurityConfigs.SASL_ENABLED_MECHANISMS_CONFIG, Arrays.asList("OAUTHBEARER"));
+        saslClientConfigs.put(SaslConfigs.SASL_JAAS_CONFIG,
+                TestJaasConfig.jaasConfigProperty("OAUTHBEARER", Collections.singletonMap("unsecuredLoginStringClaim_sub", TestJaasConfig.USERNAME)));
+        saslServerConfigs.put("listener.name.sasl_ssl.oauthbearer." + SaslConfigs.SASL_JAAS_CONFIG,
+                TestJaasConfig.jaasConfigProperty("OAUTHBEARER", Collections.emptyMap()));
+
+        // Server without a token should start up successfully and authenticate clients.
+        server = createEchoServer(securityProtocol);
+        createAndCheckClientConnection(securityProtocol, node);
+
+        // Client without a token should fail to connect
+        saslClientConfigs.put(SaslConfigs.SASL_JAAS_CONFIG,
+                TestJaasConfig.jaasConfigProperty("OAUTHBEARER", Collections.emptyMap()));
+        createAndCheckClientConnectionFailure(securityProtocol, node);
+
+        // Server with extensions, but without a token should fail to start up since it could indicate a configuration error
+        saslServerConfigs.put("listener.name.sasl_ssl.oauthbearer." + SaslConfigs.SASL_JAAS_CONFIG,
+                TestJaasConfig.jaasConfigProperty("OAUTHBEARER", Collections.singletonMap("unsecuredLoginExtension_test", "something")));
+        try {
+            createEchoServer(securityProtocol);
+            fail("Server created with invalid login config containing extensions without a token");
+        } catch (Throwable e) {
+            assertTrue("Unexpected exception " + Utils.stackTrace(e), e.getCause() instanceof LoginException);
+        }
+    }
+
+    /**
      * Tests OAUTHBEARER fails the connection when the client presents a token with
      * insufficient scope .
      */
@@ -1245,7 +1282,7 @@ public class SaslAuthenticatorTest {
         // Without SASL_AUTHENTICATE headers, disconnect state is ChannelState.AUTHENTICATE which is
         // a hint that channel was closed during authentication, unlike ChannelState.AUTHENTICATE_FAILED
         // which is an actual authentication failure reported by the broker.
-        NetworkTestUtils.waitForChannelClose(selector, node, ChannelState.AUTHENTICATE.state());
+        NetworkTestUtils.waitForChannelClose(selector, node, ChannelState.State.AUTHENTICATE);
     }
 
     private void createServer(SecurityProtocol securityProtocol, String saslMechanism,
@@ -1308,7 +1345,7 @@ public class SaslAuthenticatorTest {
         };
         serverChannelBuilder.configure(saslServerConfigs);
         server = new NioEchoServer(listenerName, securityProtocol, new TestSecurityConfig(saslServerConfigs),
-                "localhost", serverChannelBuilder, credentialCache);
+                "localhost", serverChannelBuilder, credentialCache, time);
         server.start();
         return server;
     }
@@ -1347,7 +1384,7 @@ public class SaslAuthenticatorTest {
             }
         };
         clientChannelBuilder.configure(saslClientConfigs);
-        this.selector = NetworkTestUtils.createSelector(clientChannelBuilder);
+        this.selector = NetworkTestUtils.createSelector(clientChannelBuilder, time);
         InetSocketAddress addr = new InetSocketAddress("127.0.0.1", server.port());
         selector.connect(node, addr, BUFFER_SIZE, BUFFER_SIZE);
     }
@@ -1452,7 +1489,7 @@ public class SaslAuthenticatorTest {
         String saslMechanism = (String) saslClientConfigs.get(SaslConfigs.SASL_MECHANISM);
         this.channelBuilder = ChannelBuilders.clientChannelBuilder(securityProtocol, JaasContext.Type.CLIENT,
                 new TestSecurityConfig(clientConfigs), null, saslMechanism, true);
-        this.selector = NetworkTestUtils.createSelector(channelBuilder);
+        this.selector = NetworkTestUtils.createSelector(channelBuilder, time);
     }
 
     private NioEchoServer createEchoServer(SecurityProtocol securityProtocol) throws Exception {
@@ -1461,7 +1498,7 @@ public class SaslAuthenticatorTest {
 
     private NioEchoServer createEchoServer(ListenerName listenerName, SecurityProtocol securityProtocol) throws Exception {
         return NetworkTestUtils.createEchoServer(listenerName, securityProtocol,
-                new TestSecurityConfig(saslServerConfigs), credentialCache);
+                new TestSecurityConfig(saslServerConfigs), credentialCache, time);
     }
 
     private void createClientConnection(SecurityProtocol securityProtocol, String node) throws Exception {
@@ -1490,8 +1527,7 @@ public class SaslAuthenticatorTest {
     private ChannelState createAndCheckClientConnectionFailure(SecurityProtocol securityProtocol, String node)
             throws Exception {
         createClientConnection(securityProtocol, node);
-        ChannelState finalState = NetworkTestUtils.waitForChannelClose(selector, node,
-                ChannelState.State.AUTHENTICATION_FAILED);
+        ChannelState finalState = NetworkTestUtils.waitForChannelClose(selector, node, ChannelState.State.AUTHENTICATION_FAILED);
         selector.close();
         selector = null;
         return finalState;
@@ -1543,7 +1579,7 @@ public class SaslAuthenticatorTest {
         }
 
         @Override
-        protected boolean authenticate(String username, char[] password) throws IOException {
+        protected boolean authenticate(String username, char[] password) {
             if (!configured)
                 throw new IllegalStateException("Server callback handler not configured");
             return USERNAME.equals(username) && new String(password).equals(PASSWORD);
@@ -1593,7 +1629,7 @@ public class SaslAuthenticatorTest {
         }
 
         @Override
-        public void handle(Callback[] callbacks) throws IOException, UnsupportedCallbackException {
+        public void handle(Callback[] callbacks) throws UnsupportedCallbackException {
             if (!configured)
                 throw new IllegalStateException("Client callback handler not configured");
             for (Callback callback : callbacks) {
@@ -1664,7 +1700,7 @@ public class SaslAuthenticatorTest {
         }
 
         @Override
-        public void handle(Callback[] callbacks) throws IOException, UnsupportedCallbackException {
+        public void handle(Callback[] callbacks) {
             if (!configured)
                 throw new IllegalStateException("Login callback handler not configured");
 
