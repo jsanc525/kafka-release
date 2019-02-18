@@ -440,13 +440,14 @@ object ConsumerPathZNode {
 }
 
 object ConsumerOffset {
-  def path(group: String, topic: String, partition: Integer) = s"/consumers/${group}/offsets/${topic}/${partition}"
+  def path(group: String, topic: String, partition: Integer) = s"${ConsumerPathZNode.path}/${group}/offsets/${topic}/${partition}"
   def encode(offset: Long): Array[Byte] = offset.toString.getBytes(UTF_8)
   def decode(bytes: Array[Byte]): Option[Long] = Option(bytes).map(new String(_, UTF_8).toLong)
 }
 
 object ZkVersion {
-  val NoVersion = -1
+  val MatchAnyVersion = -1 // if used in a conditional set, matches any version (the value should match ZooKeeper codebase)
+  val UnknownVersion = -2  // Version returned from get if node does not exist (internal constant for Kafka codebase, unused value in ZK)
 }
 
 object ZkStat {
@@ -501,9 +502,7 @@ sealed trait ZkAclStore {
 
 object ZkAclStore {
   private val storesByType: Map[PatternType, ZkAclStore] = PatternType.values
-    .filter(patternType => patternType != PatternType.MATCH)
-    .filter(patternType => patternType != PatternType.ANY)
-    .filter(patternType => patternType != PatternType.UNKNOWN)
+    .filter(_.isSpecific)
     .map(patternType => (patternType, create(patternType)))
     .toMap
 

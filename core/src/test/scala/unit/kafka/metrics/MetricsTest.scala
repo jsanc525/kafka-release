@@ -44,14 +44,14 @@ class MetricsTest extends KafkaServerTestHarness with Logging {
   overridingProps.put(KafkaConfig.ProducerMetricsEnableProp, "true")
   
   def generateConfigs =
-    TestUtils.createBrokerConfigs(numNodes, zkConnect, enableDeleteTopic=true).map(KafkaConfig.fromProps(_, overridingProps))
+    TestUtils.createBrokerConfigs(numNodes, zkConnect).map(KafkaConfig.fromProps(_, overridingProps))
 
   val nMessages = 2
 
   @Test
   def testMetricsReporterAfterDeletingTopic() {
     val topic = "test-topic-metric"
-    adminZkClient.createTopic(topic, 1, 1)
+    createTopic(topic, 1, 1)
     adminZkClient.deleteTopic(topic)
     TestUtils.verifyTopicDeletion(zkClient, topic, 1, servers)
     assertEquals("Topic metrics exists after deleteTopic", Set.empty, topicMetricGroups(topic))
@@ -60,7 +60,7 @@ class MetricsTest extends KafkaServerTestHarness with Logging {
   @Test
   def testBrokerTopicMetricsUnregisteredAfterDeletingTopic() {
     val topic = "test-broker-topic-metric"
-    adminZkClient.createTopic(topic, 2, 1)
+    createTopic(topic, 2, 1)
     // Produce a few messages to create the metrics
     // Don't consume messages as it may cause metrics to be re-created causing the test to fail, see KAFKA-5238
     TestUtils.generateAndProduceMessages(servers, topic, nMessages)
@@ -172,7 +172,7 @@ class MetricsTest extends KafkaServerTestHarness with Logging {
     val props: Option[Properties] = Some(properties)
      val records = (0 until nMessages).map(_ => new ProducerRecord[Array[Byte], Array[Byte]](topic,
       new Array[Byte](100 * 1000)))
-    TestUtils.produceMessages(servers, records, produceProps = props)
+    TestUtils.produceMessages(servers, records, producerProps = props)
 
     // Check the log size for each broker so that we can distinguish between failures caused by replication issues
     // versus failures caused by the metrics
@@ -188,7 +188,7 @@ class MetricsTest extends KafkaServerTestHarness with Logging {
     val initialMessagesIn = meterCount(messagesInMetricName)
 
     // Produce a few messages to make the metrics tick
-    TestUtils.produceMessages(servers, records, produceProps = props)
+    TestUtils.produceMessages(servers, records, producerProps = props)
 
     val recvdMsgsIn = meterCount(messagesInMetricName)
 

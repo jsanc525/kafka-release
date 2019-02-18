@@ -50,7 +50,7 @@ import java.util.Set;
  * is removed from the metadata refresh set after an update. Consumers disable topic expiry since they explicitly
  * manage topics while producers rely on topic expiry to limit the refresh set.
  */
-public final class Metadata implements Closeable {
+public class Metadata implements Closeable {
 
     private static final Logger log = LoggerFactory.getLogger(Metadata.class);
 
@@ -125,14 +125,26 @@ public final class Metadata implements Closeable {
     }
 
     /**
+     * Return the next time when the current cluster info can be updated (i.e., backoff time has elapsed).
+     *
+     * @param nowMs current time in ms
+     * @return remaining time in ms till the cluster info can be updated again
+     */
+    public synchronized long timeToAllowUpdate(long nowMs) {
+        return Math.max(this.lastRefreshMs + this.refreshBackoffMs - nowMs, 0);
+    }
+
+    /**
      * The next time to update the cluster info is the maximum of the time the current info will expire and the time the
      * current info can be updated (i.e. backoff time has elapsed); If an update has been request then the expiry time
      * is now
+     *
+     * @param nowMs current time in ms
+     * @return remaining time in ms till updating the cluster info
      */
     public synchronized long timeToNextUpdate(long nowMs) {
         long timeToExpire = needUpdate ? 0 : Math.max(this.lastSuccessfulRefreshMs + this.metadataExpireMs - nowMs, 0);
-        long timeToAllowUpdate = this.lastRefreshMs + this.refreshBackoffMs - nowMs;
-        return Math.max(timeToExpire, timeToAllowUpdate);
+        return Math.max(timeToExpire, timeToAllowUpdate(nowMs));
     }
 
     /**
@@ -380,6 +392,7 @@ public final class Metadata implements Closeable {
 
     private Cluster getClusterForCurrentTopics(Cluster cluster) {
         Set<String> unauthorizedTopics = new HashSet<>();
+        Set<String> invalidTopics = new HashSet<>();
         Collection<PartitionInfo> partitionInfos = new ArrayList<>();
         List<Node> nodes = Collections.emptyList();
         Set<String> internalTopics = Collections.emptySet();
@@ -391,6 +404,9 @@ public final class Metadata implements Closeable {
             unauthorizedTopics.addAll(cluster.unauthorizedTopics());
             unauthorizedTopics.retainAll(this.topics.keySet());
 
+            invalidTopics.addAll(cluster.invalidTopics());
+            invalidTopics.addAll(this.cluster.invalidTopics());
+
             for (String topic : this.topics.keySet()) {
                 List<PartitionInfo> partitionInfoList = cluster.partitionsForTopic(topic);
                 if (!partitionInfoList.isEmpty()) {
@@ -400,6 +416,6 @@ public final class Metadata implements Closeable {
             nodes = cluster.nodes();
             controller  = cluster.controller();
         }
-        return new Cluster(clusterId, nodes, partitionInfos, unauthorizedTopics, internalTopics, controller);
+        return new Cluster(clusterId, nodes, partitionInfos, unauthorizedTopics, invalidTopics, internalTopics, controller);
     }
 }

@@ -40,7 +40,6 @@ import scala.collection.JavaConverters._
 import scala.collection.mutable.HashMap
 import scala.collection.{Set, mutable}
 
-
 object ControllerChannelManager {
   val QueueSizeMetricName = "QueueSize"
   val RequestRateAndQueueTimeMetricName = "RequestRateAndQueueTimeMs"
@@ -140,6 +139,7 @@ class ControllerChannelManager(controllerContext: ControllerContext, config: Kaf
         Selectable.USE_DEFAULT_BUFFER_SIZE,
         Selectable.USE_DEFAULT_BUFFER_SIZE,
         config.requestTimeoutMs,
+        ClientDnsLookup.DEFAULT,
         time,
         false,
         new ApiVersions,
@@ -389,7 +389,7 @@ class ControllerBrokerRequestBatch(controller: KafkaController, stateChangeLogge
 
     updateMetadataRequestBrokerSet ++= brokerIds.filter(_ >= 0)
     givenPartitions.foreach(partition => updateMetadataRequestPartitionInfo(partition,
-      beingDeleted = controller.topicDeletionManager.partitionsToBeDeleted.contains(partition)))
+      beingDeleted = controller.topicDeletionManager.topicsToBeDeleted.contains(partition.topic)))
   }
 
   def sendRequestsToBrokers(controllerEpoch: Int) {
