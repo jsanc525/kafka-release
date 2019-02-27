@@ -35,23 +35,23 @@ def _kafka_jar_versions(proc_string):
     """
 
     # Pattern example: kafka_2.11-1.0.0-SNAPSHOT.jar (we have to be careful not to partially match the 4 segment version string)
-    versions = re.findall("kafka_[0-9]+\.[0-9]+-([0-9]+\.[0-9]+\.[0-9]+)[\.-][a-zA-z]", proc_string)
+    versions = re.findall("kafka_[0-9]+\.[0-9]+-([1-9][1-9]*\.[0-9]+\.[0-9]+)", proc_string)
 
     # Pattern example: kafka_2.11-0.11.0.0-SNAPSHOT.jar
-    versions.extend(re.findall("kafka_[0-9]+\.[0-9]+-([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)", proc_string))
+    versions.extend(re.findall("kafka_[0-9]+\.[0-9]+-(0\.[0-9]+\.[0-9]+\.[0-9]+)", proc_string))
 
     # Pattern example: kafka-1.0.0/bin/../libs/* (i.e. the JARs are not listed explicitly, we have to be careful not to
     # partially match the 4 segment version)
-    versions.extend(re.findall("kafka-([0-9]+\.[0-9]+\.[0-9]+)/", proc_string))
+    versions.extend(re.findall("kafka-([1-9][0-9]*\.[0-9]+\.[0-9]+)", proc_string))
 
     # Pattern example: kafka-0.11.0.0/bin/../libs/* (i.e. the JARs are not listed explicitly)
-    versions.extend(re.findall("kafka-([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)", proc_string))
+    versions.extend(re.findall("kafka-(0\.[0-9]+\.[0-9]+\.[0-9]+)", proc_string))
 
     # Pattern example: kafka-streams-1.0.0-SNAPSHOT.jar (we have to be careful not to partially match the 4 segment version string)
-    versions.extend(re.findall("kafka-[a-z]+-([0-9]+\.[0-9]+\.[0-9]+)[\.-][a-zA-z]", proc_string))
+    versions.extend(re.findall("kafka-[a-z]+-([1-9][0-9]*\.[0-9]+\.[0-9]+)", proc_string))
 
     # Pattern example: kafka-streams-0.11.0.0-SNAPSHOT.jar
-    versions.extend(re.findall("kafka-[a-z]+-([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)", proc_string))
+    versions.extend(re.findall("kafka-[a-z]+-(0\.[0-9]+\.[0-9]+\.[0-9]+)", proc_string))
 
     return set(versions)
 
