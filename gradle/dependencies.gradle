@@ -54,7 +54,7 @@ versions += [
   bcpkix: "1.60",
   caffeine: "2.6.1",
   easymock: "3.6",
-  jackson: "2.9.7",
+  jackson: "2.9.8",
   jetty: "9.4.12.v20180830",
   jersey: "2.27",
   jmh: "1.21",
