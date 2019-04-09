@@ -50,6 +50,7 @@ import org.apache.kafka.common.requests.OffsetFetchResponse;
 import org.apache.kafka.common.utils.LogContext;
 import org.apache.kafka.common.utils.Time;
 import org.apache.kafka.common.utils.Timer;
+import org.apache.kafka.common.utils.Utils;
 import org.slf4j.Logger;
 
 import java.nio.ByteBuffer;
@@ -286,7 +287,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
 
         // execute the user's callback after rebalance
         ConsumerRebalanceListener listener = subscriptions.rebalanceListener();
-        log.info("Setting newly assigned partitions {}", assignedPartitions);
+        log.info("Setting newly assigned partitions: {}", Utils.join(assignedPartitions, ", "));
         try {
             listener.onPartitionsAssigned(assignedPartitions);
         } catch (WakeupException | InterruptException e) {
@@ -500,6 +501,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
             final TopicPartition tp = entry.getKey();
             final long offset = entry.getValue().offset();
             log.debug("Setting offset for partition {} to the committed offset {}", tp, offset);
+            entry.getValue().leaderEpoch().ifPresent(epoch -> this.metadata.updateLastSeenEpochIfNewer(entry.getKey(), epoch));
             this.subscriptions.seek(tp, offset);
         }
         return true;
@@ -621,7 +623,6 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
             public void onSuccess(Void value) {
                 if (interceptors != null)
                     interceptors.onCommit(offsets);
-
                 completedOffsetCommits.add(new OffsetCommitCompletion(cb, offsets, null));
             }
 
@@ -631,7 +632,6 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
 
                 if (e instanceof RetriableException)
                     commitException = new RetriableCommitFailedException(e);
-
                 completedOffsetCommits.add(new OffsetCommitCompletion(cb, offsets, commitException));
             }
         });

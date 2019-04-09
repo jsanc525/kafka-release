@@ -60,12 +60,16 @@ class MetricsTest extends KafkaServerTestHarness with Logging {
   @Test
   def testBrokerTopicMetricsUnregisteredAfterDeletingTopic() {
     val topic = "test-broker-topic-metric"
-    createTopic(topic, 2, 1)
+    val partitions = 2
+    createTopic(topic, partitions, 1)
     // Produce a few messages to create the metrics
     // Don't consume messages as it may cause metrics to be re-created causing the test to fail, see KAFKA-5238
     TestUtils.generateAndProduceMessages(servers, topic, nMessages)
     assertTrue("Topic metrics don't exist", topicMetricGroups(topic).nonEmpty)
-    servers.foreach(s => assertNotNull(s.brokerTopicStats.topicStats(topic)))
+    servers.foreach(s => {
+      assertNotNull(s.brokerTopicStats.topicStats(topic))
+      Range.apply(0, 2).foreach( x => assertNotNull(s.brokerTopicStats.topicStats(topic, x)))
+    })
     adminZkClient.deleteTopic(topic)
     TestUtils.verifyTopicDeletion(zkClient, topic, 1, servers)
     assertEquals("Topic metrics exists after deleteTopic", Set.empty, topicMetricGroups(topic))

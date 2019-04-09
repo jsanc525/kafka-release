@@ -31,7 +31,7 @@ public class Topic {
         '\uD800' + "-" + '\uF8FF' + '\uFFF0' + "-" + '\uFFFF';
     private static final Pattern ILLEGAL_CHARS_PATTERN = Pattern.compile("[" + ILLEGAL_CHARS + "]");
 
-    private static final Set<String> INTERNAL_TOPICS = Collections.unmodifiableSet(
+    public static final Set<String> INTERNAL_TOPICS = Collections.unmodifiableSet(
             Utils.mkSet(GROUP_METADATA_TOPIC_NAME, TRANSACTION_STATE_TOPIC_NAME));
 
     private static final int MAX_NAME_LENGTH = 249;

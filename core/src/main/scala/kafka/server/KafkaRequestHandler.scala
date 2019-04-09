@@ -31,7 +31,7 @@ import org.apache.kafka.common.TopicPartition
 import org.apache.kafka.common.internals.FatalExitError
 import org.apache.kafka.common.utils.{KafkaThread, Time}
 
-import scala.collection.{JavaConversions, mutable}
+import scala.collection.{JavaConverters, mutable}
 
 /**
  * A thread that answers kafka requests.
@@ -100,13 +100,15 @@ class KafkaRequestHandlerPool(val brokerId: Int,
                               val requestChannel: RequestChannel,
                               val apis: KafkaApis,
                               time: Time,
-                              numThreads: Int) extends Logging with KafkaMetricsGroup {
+                              numThreads: Int,
+                              requestHandlerAvgIdleMetricName: String,
+                              logAndThreadNamePrefix : String) extends Logging with KafkaMetricsGroup {
 
   private val threadPoolSize: AtomicInteger = new AtomicInteger(numThreads)
   /* a meter to track the average free capacity of the request handlers */
-  private val aggregateIdleMeter = newMeter("RequestHandlerAvgIdlePercent", "percent", TimeUnit.NANOSECONDS)
+  private val aggregateIdleMeter = newMeter(requestHandlerAvgIdleMetricName, "percent", TimeUnit.NANOSECONDS)
 
-  this.logIdent = "[Kafka Request Handler on Broker " + brokerId + "], "
+  this.logIdent = "[" + logAndThreadNamePrefix + " Kafka Request Handler on Broker " + brokerId + "], "
   val runnables = new mutable.ArrayBuffer[KafkaRequestHandler](numThreads)
   for (i <- 0 until numThreads) {
     createHandler(i)
@@ -114,7 +116,7 @@ class KafkaRequestHandlerPool(val brokerId: Int,
 
   def createHandler(id: Int): Unit = synchronized {
     runnables += new KafkaRequestHandler(id, brokerId, aggregateIdleMeter, threadPoolSize, requestChannel, apis, time)
-    KafkaThread.daemon("kafka-request-handler-" + id, runnables(id)).start()
+    KafkaThread.daemon(logAndThreadNamePrefix + "-kafka-request-handler-" + id, runnables(id)).start()
   }
 
   def resizeThreadPool(newSize: Int): Unit = synchronized {
@@ -262,7 +264,7 @@ class ProducerStats(producerCacheMaxSize: Int, producerCacheExpiryMs: Long) exte
   private def removeMetrics(clientId: String, partitions: util.Collection[TopicPartition]) = {
     debug(s"Removing clientId: $clientId with partitions: $partitions")
     if (partitions != null && !partitions.isEmpty) {
-      JavaConversions.collectionAsScalaIterable(partitions).foreach(tp => {
+      JavaConverters.collectionAsScalaIterable(partitions).foreach(tp => {
         val metrics = clientMetrics.remove((clientId, tp))
         if (metrics != null) metrics.close()
       })

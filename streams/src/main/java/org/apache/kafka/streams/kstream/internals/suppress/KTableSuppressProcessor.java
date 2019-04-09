@@ -16,12 +16,15 @@
  */
 package org.apache.kafka.streams.kstream.internals.suppress;
 
+import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.common.metrics.Sensor;
 import org.apache.kafka.common.serialization.Serde;
 import org.apache.kafka.common.utils.Bytes;
 import org.apache.kafka.streams.KeyValue;
 import org.apache.kafka.streams.errors.StreamsException;
 import org.apache.kafka.streams.kstream.internals.Change;
 import org.apache.kafka.streams.kstream.internals.FullChangeSerde;
+import org.apache.kafka.streams.kstream.internals.metrics.Sensors;
 import org.apache.kafka.streams.kstream.internals.suppress.TimeDefinitions.TimeDefinition;
 import org.apache.kafka.streams.processor.Processor;
 import org.apache.kafka.streams.processor.ProcessorContext;
@@ -40,13 +43,16 @@ public class KTableSuppressProcessor<K, V> implements Processor<K, Change<V>> {
     private final long suppressDurationMillis;
     private final TimeDefinition<K> bufferTimeDefinition;
     private final BufferFullStrategy bufferFullStrategy;
-    private final boolean shouldSuppressTombstones;
+    private final boolean safeToDropTombstones;
     private final String storeName;
+
     private TimeOrderedKeyValueBuffer buffer;
     private InternalProcessorContext internalProcessorContext;
-
+    private Sensor suppressionEmitSensor;
     private Serde<K> keySerde;
     private FullChangeSerde<V> valueSerde;
+
+    private long observedStreamTime = ConsumerRecord.NO_TIMESTAMP;
 
     public KTableSuppressProcessor(final SuppressedInternal<K> suppress,
                                    final String storeName,
@@ -61,13 +67,15 @@ public class KTableSuppressProcessor<K, V> implements Processor<K, Change<V>> {
         suppressDurationMillis = suppress.timeToWaitForMoreEvents().toMillis();
         bufferTimeDefinition = suppress.timeDefinition();
         bufferFullStrategy = suppress.bufferConfig().bufferFullStrategy();
-        shouldSuppressTombstones = suppress.shouldSuppressTombstones();
+        safeToDropTombstones = suppress.safeToDropTombstones();
     }
 
     @SuppressWarnings("unchecked")
     @Override
     public void init(final ProcessorContext context) {
         internalProcessorContext = (InternalProcessorContext) context;
+        suppressionEmitSensor = Sensors.suppressionEmitSensor(internalProcessorContext);
+
         keySerde = keySerde == null ? (Serde<K>) context.keySerde() : keySerde;
         valueSerde = valueSerde == null ? FullChangeSerde.castOrWrap(context.valueSerde()) : valueSerde;
         buffer = Objects.requireNonNull((TimeOrderedKeyValueBuffer) context.getStateStore(storeName));
@@ -75,6 +83,7 @@ public class KTableSuppressProcessor<K, V> implements Processor<K, Change<V>> {
 
     @Override
     public void process(final K key, final Change<V> value) {
+        observedStreamTime = Math.max(observedStreamTime, internalProcessorContext.timestamp());
         buffer(key, value);
         enforceConstraints();
     }
@@ -90,7 +99,7 @@ public class KTableSuppressProcessor<K, V> implements Processor<K, Change<V>> {
     }
 
     private void enforceConstraints() {
-        final long streamTime = internalProcessorContext.streamTime();
+        final long streamTime = observedStreamTime;
         final long expiryTime = streamTime - suppressDurationMillis;
 
         buffer.evictWhile(() -> buffer.minTimestamp() <= expiryTime, this::emit);
@@ -123,6 +132,7 @@ public class KTableSuppressProcessor<K, V> implements Processor<K, Change<V>> {
             try {
                 final K key = keySerde.deserializer().deserialize(null, toEmit.key.get());
                 internalProcessorContext.forward(key, value);
+                suppressionEmitSensor.record();
             } finally {
                 internalProcessorContext.setRecordContext(prevRecordContext);
             }
@@ -130,7 +140,7 @@ public class KTableSuppressProcessor<K, V> implements Processor<K, Change<V>> {
     }
 
     private boolean shouldForward(final Change<V> value) {
-        return !(value.newValue == null && shouldSuppressTombstones);
+        return value.newValue != null || !safeToDropTombstones;
     }
 
     @Override

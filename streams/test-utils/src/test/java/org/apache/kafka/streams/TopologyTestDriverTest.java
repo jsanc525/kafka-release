@@ -16,7 +16,6 @@
  */
 package org.apache.kafka.streams;
 
-import java.time.Duration;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.header.Header;
@@ -41,6 +40,8 @@ import org.apache.kafka.streams.processor.ProcessorSupplier;
 import org.apache.kafka.streams.processor.PunctuationType;
 import org.apache.kafka.streams.processor.Punctuator;
 import org.apache.kafka.streams.processor.StateStore;
+import org.apache.kafka.streams.processor.TaskId;
+import org.apache.kafka.streams.state.KeyValueBytesStoreSupplier;
 import org.apache.kafka.streams.state.KeyValueIterator;
 import org.apache.kafka.streams.state.KeyValueStore;
 import org.apache.kafka.streams.state.Stores;
@@ -54,6 +55,8 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
+import java.io.File;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -72,6 +75,7 @@ import static org.apache.kafka.common.utils.Utils.mkMap;
 import static org.apache.kafka.common.utils.Utils.mkProperties;
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertThat;
 import static org.junit.Assert.assertTrue;
@@ -114,8 +118,6 @@ public class TopologyTestDriverTest {
         new StringSerializer(),
         new LongSerializer());
 
-    private final boolean eosEnabled;
-
     @Parameterized.Parameters(name = "Eos enabled = {0}")
     public static Collection<Object[]> data() {
         final List<Object[]> values = new ArrayList<>();
@@ -126,7 +128,6 @@ public class TopologyTestDriverTest {
     }
 
     public TopologyTestDriverTest(final boolean eosEnabled) {
-        this.eosEnabled = eosEnabled;
         if (eosEnabled) {
             config.put(StreamsConfig.PROCESSING_GUARANTEE_CONFIG, StreamsConfig.EXACTLY_ONCE);
         }
@@ -773,14 +774,18 @@ public class TopologyTestDriverTest {
     }
 
     private void setup() {
+        setup(Stores.inMemoryKeyValueStore("aggStore"));
+    }
+
+    private void setup(final KeyValueBytesStoreSupplier storeSupplier) {
         final Topology topology = new Topology();
         topology.addSource("sourceProcessor", "input-topic");
         topology.addProcessor("aggregator", new CustomMaxAggregatorSupplier(), "sourceProcessor");
         topology.addStateStore(Stores.keyValueStoreBuilder(
-            Stores.inMemoryKeyValueStore("aggStore"),
-            Serdes.String(),
-            Serdes.Long()),
-            "aggregator");
+                storeSupplier,
+                Serdes.String(),
+                Serdes.Long()),
+                "aggregator");
         topology.addSink("sinkProcessor", "result-topic", "aggregator");
 
         config.setProperty(StreamsConfig.DEFAULT_KEY_SERDE_CLASS_CONFIG, Serdes.String().getClass().getName());
@@ -890,6 +895,23 @@ public class TopologyTestDriverTest {
     }
 
     @Test
+    public void shouldAllowPrePopulatingStatesStoresWithCachingEnabled() {
+        final Topology topology = new Topology();
+        topology.addSource("sourceProcessor", "input-topic");
+        topology.addProcessor("aggregator", new CustomMaxAggregatorSupplier(), "sourceProcessor");
+        topology.addStateStore(Stores.keyValueStoreBuilder(
+            Stores.inMemoryKeyValueStore("aggStore"),
+            Serdes.String(),
+            Serdes.Long()).withCachingEnabled(), // intentionally turn on caching to achieve better test coverage
+            "aggregator");
+
+        testDriver = new TopologyTestDriver(topology, config);
+
+        store = testDriver.getKeyValueStore("aggStore");
+        store.put("a", 21L);
+    }
+
+    @Test
     public void shouldCleanUpPersistentStateStoresOnClose() {
         final Topology topology = new Topology();
         topology.addSource("sourceProcessor", "input-topic");
@@ -901,9 +923,9 @@ public class TopologyTestDriverTest {
                     return new Processor<String, Long>() {
                         private KeyValueStore<String, Long> store;
 
+                        @SuppressWarnings("unchecked")
                         @Override
                         public void init(final ProcessorContext context) {
-                            //noinspection unchecked
                             this.store = (KeyValueStore<String, Long>) context.getStateStore("storeProcessorStore");
                         }
 
@@ -1052,5 +1074,26 @@ public class TopologyTestDriverTest {
                             SOURCE_TOPIC_1);
             assertEquals(str, exception.getMessage());
         }
+    }
+
+    @Test
+    public void shouldNotCreateStateDirectoryForStatelessTopology() {
+        setup();
+        final String stateDir = config.getProperty(StreamsConfig.STATE_DIR_CONFIG);
+        final File appDir = new File(stateDir, config.getProperty(StreamsConfig.APPLICATION_ID_CONFIG));
+        assertFalse(appDir.exists());
+    }
+
+    @Test
+    public void shouldCreateStateDirectoryForStatefulTopology() {
+        setup(Stores.persistentKeyValueStore("aggStore"));
+        final String stateDir = config.getProperty(StreamsConfig.STATE_DIR_CONFIG);
+        final File appDir = new File(stateDir, config.getProperty(StreamsConfig.APPLICATION_ID_CONFIG));
+
+        assertTrue(appDir.exists());
+        assertTrue(appDir.isDirectory());
+
+        final TaskId taskId = new TaskId(0, 0);
+        assertTrue(new File(appDir, taskId.toString()).exists());
     }
 }

@@ -55,7 +55,7 @@ fi
 base_dir=$(dirname $0)/..
 
 if [ -z "$SCALA_VERSION" ]; then
-  SCALA_VERSION=2.11.12
+  SCALA_VERSION=2.12.8
 fi
 
 if [ -z "$SCALA_BINARY_VERSION" ]; then

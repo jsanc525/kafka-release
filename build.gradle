@@ -29,11 +29,11 @@ buildscript {
     // For Apache Rat plugin to ignore non-Git files
     classpath "org.ajoberstar:grgit:1.9.3"
     classpath 'com.github.ben-manes:gradle-versions-plugin:0.20.0'
-    classpath 'org.scoverage:gradle-scoverage:2.4.0'
-    classpath 'com.github.jengelman.gradle.plugins:shadow:4.0.0'
-    classpath 'org.owasp:dependency-check-gradle:3.3.2'
-    classpath "com.diffplug.spotless:spotless-plugin-gradle:3.15.0"
-    classpath "gradle.plugin.com.github.spotbugs:spotbugs-gradle-plugin:1.6.4"
+    classpath 'org.scoverage:gradle-scoverage:2.5.0'
+    classpath 'com.github.jengelman.gradle.plugins:shadow:4.0.3'
+    classpath 'org.owasp:dependency-check-gradle:4.0.2'
+    classpath "com.diffplug.spotless:spotless-plugin-gradle:3.17.0"
+    classpath "gradle.plugin.com.github.spotbugs:spotbugs-gradle-plugin:1.6.9"
   }
 }
 
@@ -93,7 +93,7 @@ allprojects {
 }
 
 ext {
-  gradleVersion = "4.10.2"
+  gradleVersion = "5.1.1"
   minJavaVersion = "8"
   buildVersionFileName = "kafka-version.properties"
 
@@ -155,15 +155,19 @@ subprojects {
   apply plugin: 'maven'
   apply plugin: 'signing'
   apply plugin: 'checkstyle'
-  if (!JavaVersion.current().isJava11Compatible())
-    apply plugin: "com.github.spotbugs"
+  apply plugin: "com.github.spotbugs"
 
   sourceCompatibility = minJavaVersion
   targetCompatibility = minJavaVersion
 
-  compileJava {
+  tasks.withType(JavaCompile) {
     options.encoding = 'UTF-8'
-    options.compilerArgs << "-Xlint:deprecation,unchecked"
+    options.compilerArgs << "-Xlint:all"
+    // temporary exclusions until all the warnings are fixed
+    options.compilerArgs << "-Xlint:-rawtypes"
+    options.compilerArgs << "-Xlint:-serial"
+    options.compilerArgs << "-Xlint:-try"
+    options.compilerArgs << "-Werror"
     // --release is the recommended way to select the target release, but it's only supported in Java 9 so we also
     // set --source and --target via `sourceCompatibility` and `targetCompatibility`. If/when Gradle supports `--release`
     // natively (https://github.com/gradle/gradle/issues/2510), we should switch to that.
@@ -251,10 +255,11 @@ subprojects {
       exceptionFormat = testExceptionFormat
     }
 
-    useJUnit {
-      excludeCategories 'org.apache.kafka.test.IntegrationTest'
+    if (it.project.name != 'generator') {
+      useJUnit {
+        excludeCategories 'org.apache.kafka.test.IntegrationTest'
+      }
     }
-    
   }
 
   jar {
@@ -371,23 +376,31 @@ subprojects {
     configProperties = checkstyleConfigProperties("import-control.xml")
     toolVersion = '8.10'
   }
+
+  configure(checkstyleMain) {
+    group = 'Verification'
+    description = 'Run checkstyle on all main Java sources'
+  }
+
+  configure(checkstyleTest) {
+    group = 'Verification'
+    description = 'Run checkstyle on all test Java sources'
+  }
+
   test.dependsOn('checkstyleMain', 'checkstyleTest')
 
-  if (!JavaVersion.current().isJava11Compatible()) {
-    spotbugs {
-      // 3.1.6 has a regression that breaks our build, seems to be https://github.com/spotbugs/spotbugs/pull/688
-      toolVersion = '3.1.5'
-      excludeFilter = file("$rootDir/gradle/spotbugs-exclude.xml")
-      ignoreFailures = false
-    }
-    test.dependsOn('spotbugsMain')
+  spotbugs {
+    toolVersion = '3.1.8'
+    excludeFilter = file("$rootDir/gradle/spotbugs-exclude.xml")
+    ignoreFailures = false
+  }
+  test.dependsOn('spotbugsMain')
 
-    tasks.withType(com.github.spotbugs.SpotBugsTask) {
-      reports {
-        // Continue supporting `xmlFindBugsReport` for compatibility
-        xml.enabled(project.hasProperty('xmlSpotBugsReport') || project.hasProperty('xmlFindBugsReport'))
-        html.enabled(!project.hasProperty('xmlSpotBugsReport') && !project.hasProperty('xmlFindBugsReport'))
-      }
+  tasks.withType(com.github.spotbugs.SpotBugsTask) {
+    reports {
+      // Continue supporting `xmlFindBugsReport` for compatibility
+      xml.enabled(project.hasProperty('xmlSpotBugsReport') || project.hasProperty('xmlFindBugsReport'))
+      html.enabled(!project.hasProperty('xmlSpotBugsReport') && !project.hasProperty('xmlFindBugsReport'))
     }
   }
 
@@ -567,6 +580,7 @@ project(':core') {
   dependencies {
     compile project(':clients')
     compile libs.jacksonDatabind
+    compile libs.jacksonJDK8Datatypes
     compile libs.joptSimple
     compile libs.metrics
 
@@ -840,6 +854,23 @@ project(':contrib:kafka-ganglia') {
   checkstyleMain.exclude '**/kafka/ganglia/**'
 }
 
+project(':generator') {
+  dependencies {
+    compile libs.jacksonDatabind
+    compile libs.jacksonJDK8Datatypes
+    compile libs.jacksonJaxrsJsonProvider
+    testCompile libs.junit
+  }
+
+  integrationTest {
+    enabled = false
+  }
+
+  javadoc {
+    enabled = false
+  }
+}
+
 project(':clients') {
   archivesBaseName = "kafka-clients"
 
@@ -856,6 +887,7 @@ project(':clients') {
     compile libs.snappy
     compile libs.slf4jApi
     compileOnly libs.jacksonDatabind // for SASL/OAUTHBEARER bearer token parsing
+    compileOnly libs.jacksonJDK8Datatypes
 
     jacksonDatabindConfig libs.jacksonDatabind // to publish as provided scope dependency.
 
@@ -865,6 +897,8 @@ project(':clients') {
 
     testRuntime libs.slf4jlog4j
     testRuntime libs.jacksonDatabind
+    testRuntime libs.jacksonJDK8Datatypes
+    testCompile libs.jacksonJaxrsJsonProvider
   }
 
   task determineCommitId {
@@ -913,6 +947,29 @@ project(':clients') {
     delete "$buildDir/kafka/"
   }
 
+  task processMessages(type:JavaExec) {
+    main = "org.apache.kafka.message.MessageGenerator"
+    classpath = project(':generator').sourceSets.main.runtimeClasspath
+    args = [ "src/generated/java/org/apache/kafka/common/message", "src/main/resources/common/message" ]
+    inputs.dir("src/main/resources/common/message")
+    outputs.dir("src/generated/java/org/apache/kafka/common/message")
+  }
+
+  sourceSets {
+    main {
+      java {
+        srcDirs = ["src/generated/java", "src/main/java"]
+      }
+    }
+    test {
+      java {
+        srcDirs = ["src/generated/java", "src/test/java"]
+      }
+    }
+  }
+
+  compileJava.dependsOn 'processMessages'
+
   javadoc {
     include "**/org/apache/kafka/clients/admin/*"
     include "**/org/apache/kafka/clients/consumer/*"
@@ -944,6 +1001,7 @@ project(':tools') {
     compile project(':log4j-appender')
     compile libs.argparse4j
     compile libs.jacksonDatabind
+    compile libs.jacksonJDK8Datatypes
     compile libs.slf4jApi
 
     compile libs.jacksonJaxrsJsonProvider
@@ -991,7 +1049,13 @@ project(':streams') {
 
   dependencies {
     compile project(':clients')
-    compile project(':connect:json')  // this dependency should be removed after we unify data API
+
+    // this dependency should be removed after we unify data API
+    compile(project(':connect:json')) {
+      // this transitive dependency is not used in Streams, and it breaks SBT builds
+      exclude module: 'javax.ws.rs-api'
+    }
+
     compile libs.slf4jApi
     compile libs.rocksDBJni
 
@@ -1232,6 +1296,18 @@ project(':streams:upgrade-system-tests-20') {
   }
 }
 
+project(':streams:upgrade-system-tests-21') {
+  archivesBaseName = "kafka-streams-upgrade-system-tests-21"
+
+  dependencies {
+    testCompile libs.kafkaStreams_21
+  }
+
+  systemTestLibs {
+    dependsOn testJar
+  }
+}
+
 project(':jmh-benchmarks') {
 
   apply plugin: 'com.github.johnrengelman.shadow'
@@ -1373,6 +1449,7 @@ project(':connect:json') {
   dependencies {
     compile project(':connect:api')
     compile libs.jacksonDatabind
+    compile libs.jacksonJDK8Datatypes
     compile libs.slf4jApi
 
     testCompile libs.easymock
@@ -1435,8 +1512,11 @@ project(':connect:runtime') {
     testCompile libs.junit
     testCompile libs.powermockJunit4
     testCompile libs.powermockEasymock
+    testCompile libs.httpclient
 
     testCompile project(':clients').sourceSets.test.output
+    testCompile project(':core')
+    testCompile project(':core').sourceSets.test.output
 
     testRuntime libs.slf4jlog4j
   }

@@ -24,10 +24,13 @@ import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 
 import org.apache.kafka.common.errors.AuthenticationException;
+import org.apache.kafka.common.utils.LogContext;
 import org.apache.kafka.common.utils.MockTime;
 import org.junit.Before;
 import org.junit.Test;
@@ -46,7 +49,7 @@ public class ClusterConnectionStatesTest {
 
     @Before
     public void setup() {
-        this.connectionStates = new ClusterConnectionStates(reconnectBackoffMs, reconnectBackoffMax);
+        this.connectionStates = new ClusterConnectionStates(reconnectBackoffMs, reconnectBackoffMax, new LogContext());
     }
 
     @Test
@@ -274,5 +277,37 @@ public class ClusterConnectionStatesTest {
         connectionStates.connecting(nodeId1, time.milliseconds(), hostTwoIps, ClientDnsLookup.USE_ALL_DNS_IPS);
         InetAddress addr3 = connectionStates.currentAddress(nodeId1);
         assertSame(addr1, addr3);
+    }
+
+    @Test
+    public void testHostResolveChange() throws UnknownHostException, ReflectiveOperationException {
+        assertEquals(2, ClientUtils.resolve(hostTwoIps, ClientDnsLookup.USE_ALL_DNS_IPS).size());
+
+        connectionStates.connecting(nodeId1, time.milliseconds(), hostTwoIps, ClientDnsLookup.DEFAULT);
+        InetAddress addr1 = connectionStates.currentAddress(nodeId1);
+
+        // reflection to simulate host change in DNS lookup
+        Method nodeStateMethod = connectionStates.getClass().getDeclaredMethod("nodeState", String.class);
+        nodeStateMethod.setAccessible(true);
+        Object nodeState = nodeStateMethod.invoke(connectionStates, nodeId1);
+        Field hostField = nodeState.getClass().getDeclaredField("host");
+        hostField.setAccessible(true);
+        hostField.set(nodeState, "localhost");
+
+        connectionStates.connecting(nodeId1, time.milliseconds(), "localhost", ClientDnsLookup.DEFAULT);
+        InetAddress addr2 = connectionStates.currentAddress(nodeId1);
+
+        assertNotSame(addr1, addr2);
+    }
+
+    @Test
+    public void testNodeWithNewHostname() throws UnknownHostException {
+        connectionStates.connecting(nodeId1, time.milliseconds(), "localhost", ClientDnsLookup.DEFAULT);
+        InetAddress addr1 = connectionStates.currentAddress(nodeId1);
+
+        connectionStates.connecting(nodeId1, time.milliseconds(), hostTwoIps, ClientDnsLookup.DEFAULT);
+        InetAddress addr2 = connectionStates.currentAddress(nodeId1);
+
+        assertNotSame(addr1, addr2);
     }
 }

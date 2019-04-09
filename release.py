@@ -245,7 +245,7 @@ def command_stage_docs():
 
     cmd("Building docs", "./gradlew -Pversion=%s clean releaseTarGzAll aggregatedJavadoc" % gradle_version_override, cwd=REPO_HOME, env=jdk8_env)
 
-    docs_tar = os.path.join(REPO_HOME, 'core', 'build', 'distributions', 'kafka_2.11-%s-site-docs.tgz' % gradle_version_override)
+    docs_tar = os.path.join(REPO_HOME, 'core', 'build', 'distributions', 'kafka_2.12-%s-site-docs.tgz' % gradle_version_override)
 
     versioned_docs_path = os.path.join(kafka_site_repo_path, docs_version(version))
     if not os.path.exists(versioned_docs_path):
@@ -417,13 +417,13 @@ if not user_ok("""Requirements:
       signing.keyId=your-gpgkeyId
       signing.password=your-gpg-passphrase
       signing.secretKeyRingFile=/Users/your-id/.gnupg/secring.gpg (if you are using GPG 2.1 and beyond, then this file will no longer exist anymore, and you have to manually create it from the new private key directory with "gpg --export-secret-keys -o ~/.gnupg/secring.gpg")
-8. ~/.m2/settings.xml configured for pgp signing and uploading to apache release maven, i.e., 
+8. ~/.m2/settings.xml configured for pgp signing and uploading to apache release maven, i.e.,
        <server>
           <id>apache.releases.https</id>
           <username>your-apache-id</username>
           <password>your-apache-passwd</password>
         </server>
-	<server>
+        <server>
             <id>your-gpgkeyId</id>
             <passphrase>your-gpg-passphase</passphrase>
         </server>
@@ -431,18 +431,18 @@ if not user_ok("""Requirements:
             <id>gpg-signing</id>
             <properties>
                 <gpg.keyname>your-gpgkeyId</gpg.keyname>
-        	<gpg.passphraseServerId>your-gpgkeyId</gpg.passphraseServerId>
+                <gpg.passphraseServerId>your-gpgkeyId</gpg.passphraseServerId>
             </properties>
         </profile>
 9. You may also need to update some gnupgp configs:
-	~/.gnupg/gpg-agent.conf
-	allow-loopback-pinentry
+        ~/.gnupg/gpg-agent.conf
+        allow-loopback-pinentry
 
-	~/.gnupg/gpg.conf
-	use-agent
-	pinentry-mode loopback
+        ~/.gnupg/gpg.conf
+        use-agent
+        pinentry-mode loopback
 
-	echo RELOADAGENT | gpg-connect-agent
+        echo RELOADAGENT | gpg-connect-agent
 
 If any of these are missing, see https://cwiki.apache.org/confluence/display/KAFKA/Release+Process for instructions on setting them up.
 
@@ -465,7 +465,7 @@ release_version_parts = get_release_version_parts(release_version)
 rc = raw_input("Release candidate number: ")
 
 dev_branch = '.'.join(release_version_parts[:2])
-docs_release_version = docs_version(release_version[:2])
+docs_release_version = docs_version(release_version)
 
 # Validate that the release doesn't already exist and that the
 cmd("Fetching tags from upstream", 'git fetch --tags %s' % PUSH_REMOTE_NAME)
@@ -529,7 +529,7 @@ cmd("remove backup pom.xml", "rm streams/quickstart/pom.xml.orig")
 cmd("remove backup java pom.xml", "rm streams/quickstart/java/pom.xml.orig")
 cmd("remove backup java pom.xml", "rm streams/quickstart/java/src/main/resources/archetype-resources/pom.xml.orig")
 # Command in explicit list due to messages with spaces
-cmd("Commiting version number updates", ["git", "commit", "-a", "-m", "Bump version to %s" % release_version])
+cmd("Committing version number updates", ["git", "commit", "-a", "-m", "Bump version to %s" % release_version])
 # Command in explicit list due to messages with spaces
 cmd("Tagging release candidate %s" % rc_tag, ["git", "tag", "-a", rc_tag, "-m", rc_tag])
 rc_githash = cmd_output("git show-ref --hash " + rc_tag)
@@ -640,23 +640,23 @@ Now you should sanity check it before proceeding. All subsequent steps start mak
 
 Some suggested steps:
 
- * Grab the source archive and make sure it compiles: http://home.apache.org/~%(apache_id)s/kafka-%(rc_tag)s/kafka-%(release_version)s-src.tgz
- * Grab one of the binary distros and run the quickstarts against them: http://home.apache.org/~%(apache_id)s/kafka-%(rc_tag)s/kafka_2.11-%(release_version)s.tgz
- * Extract and verify one of the site docs jars: http://home.apache.org/~%(apache_id)s/kafka-%(rc_tag)s/kafka_2.11-%(release_version)s-site-docs.tgz
+ * Grab the source archive and make sure it compiles: https://home.apache.org/~%(apache_id)s/kafka-%(rc_tag)s/kafka-%(release_version)s-src.tgz
+ * Grab one of the binary distros and run the quickstarts against them: https://home.apache.org/~%(apache_id)s/kafka-%(rc_tag)s/kafka_2.12-%(release_version)s.tgz
+ * Extract and verify one of the site docs jars: https://home.apache.org/~%(apache_id)s/kafka-%(rc_tag)s/kafka_2.12-%(release_version)s-site-docs.tgz
  * Build a sample against jars in the staging repo: (TODO: Can we get a temporary URL before "closing" the staged artifacts?)
  * Validate GPG signatures on at least one file:
-      wget http://home.apache.org/~%(apache_id)s/kafka-%(rc_tag)s/kafka-%(release_version)s-src.tgz &&
-      wget http://home.apache.org/~%(apache_id)s/kafka-%(rc_tag)s/kafka-%(release_version)s-src.tgz.asc &&
-      wget http://home.apache.org/~%(apache_id)s/kafka-%(rc_tag)s/kafka-%(release_version)s-src.tgz.md5 &&
-      wget http://home.apache.org/~%(apache_id)s/kafka-%(rc_tag)s/kafka-%(release_version)s-src.tgz.sha1 &&
-      wget http://home.apache.org/~%(apache_id)s/kafka-%(rc_tag)s/kafka-%(release_version)s-src.tgz.sha512 &&
+      wget https://home.apache.org/~%(apache_id)s/kafka-%(rc_tag)s/kafka-%(release_version)s-src.tgz &&
+      wget https://home.apache.org/~%(apache_id)s/kafka-%(rc_tag)s/kafka-%(release_version)s-src.tgz.asc &&
+      wget https://home.apache.org/~%(apache_id)s/kafka-%(rc_tag)s/kafka-%(release_version)s-src.tgz.md5 &&
+      wget https://home.apache.org/~%(apache_id)s/kafka-%(rc_tag)s/kafka-%(release_version)s-src.tgz.sha1 &&
+      wget https://home.apache.org/~%(apache_id)s/kafka-%(rc_tag)s/kafka-%(release_version)s-src.tgz.sha512 &&
       gpg --verify kafka-%(release_version)s-src.tgz.asc kafka-%(release_version)s-src.tgz &&
       gpg --print-md md5 kafka-%(release_version)s-src.tgz | diff - kafka-%(release_version)s-src.tgz.md5 &&
       gpg --print-md sha1 kafka-%(release_version)s-src.tgz | diff - kafka-%(release_version)s-src.tgz.sha1 &&
       gpg --print-md sha512 kafka-%(release_version)s-src.tgz | diff - kafka-%(release_version)s-src.tgz.sha512 &&
       rm kafka-%(release_version)s-src.tgz* &&
       echo "OK" || echo "Failed"
- * Validate the javadocs look ok. They are at http://home.apache.org/~%(apache_id)s/kafka-%(rc_tag)s/javadoc/
+ * Validate the javadocs look ok. They are at https://home.apache.org/~%(apache_id)s/kafka-%(rc_tag)s/javadoc/
 
 *******************************************************************************************************************************************************
 """ % release_notification_props)
@@ -688,30 +688,30 @@ This is the first candidate for release of Apache Kafka %(release_version)s.
 <DESCRIPTION OF MAJOR CHANGES, INCLUDE INDICATION OF MAJOR/MINOR RELEASE>
 
 Release notes for the %(release_version)s release:
-http://home.apache.org/~%(apache_id)s/kafka-%(rc_tag)s/RELEASE_NOTES.html
+https://home.apache.org/~%(apache_id)s/kafka-%(rc_tag)s/RELEASE_NOTES.html
 
 *** Please download, test and vote by <VOTING DEADLINE, e.g. Monday, March 28, 9am PT>
 
 Kafka's KEYS file containing PGP keys we use to sign the release:
-http://kafka.apache.org/KEYS
+https://kafka.apache.org/KEYS
 
 * Release artifacts to be voted upon (source and binary):
-http://home.apache.org/~%(apache_id)s/kafka-%(rc_tag)s/
+https://home.apache.org/~%(apache_id)s/kafka-%(rc_tag)s/
 
 * Maven artifacts to be voted upon:
-https://repository.apache.org/content/groups/staging/
+https://repository.apache.org/content/groups/staging/org/apache/kafka/
 
 * Javadoc:
-http://home.apache.org/~%(apache_id)s/kafka-%(rc_tag)s/javadoc/
+https://home.apache.org/~%(apache_id)s/kafka-%(rc_tag)s/javadoc/
 
 * Tag to be voted upon (off %(dev_branch)s branch) is the %(release_version)s tag:
 https://github.com/apache/kafka/releases/tag/%(rc_tag)s
 
 * Documentation:
-http://kafka.apache.org/%(docs_version)s/documentation.html
+https://kafka.apache.org/%(docs_version)s/documentation.html
 
 * Protocol:
-http://kafka.apache.org/%(docs_version)s/protocol.html
+https://kafka.apache.org/%(docs_version)s/protocol.html
 
 * Successful Jenkins builds for the %(dev_branch)s branch:
 Unit/integration tests: https://builds.apache.org/job/kafka-%(dev_branch)s-jdk8/<BUILD NUMBER>/

@@ -29,7 +29,7 @@ import com.yammer.metrics.core.Gauge
 import kafka.api.{ApiVersion, KAFKA_0_10_1_IV0, KAFKA_2_1_IV0, KAFKA_2_1_IV1}
 import kafka.common.{MessageFormatter, OffsetAndMetadata}
 import kafka.metrics.KafkaMetricsGroup
-import kafka.server.{FetchHighWatermark, FetchLogEnd, ReplicaManager}
+import kafka.server.ReplicaManager
 import kafka.utils.CoreUtils.inLock
 import kafka.utils._
 import kafka.zk.KafkaZkClient
@@ -40,7 +40,7 @@ import org.apache.kafka.common.protocol.Errors
 import org.apache.kafka.common.protocol.types.Type._
 import org.apache.kafka.common.protocol.types._
 import org.apache.kafka.common.record._
-import org.apache.kafka.common.requests.{IsolationLevel, OffsetCommitRequest, OffsetFetchResponse}
+import org.apache.kafka.common.requests.{OffsetCommitRequest, OffsetFetchResponse}
 import org.apache.kafka.common.requests.ProduceResponse.PartitionResponse
 import org.apache.kafka.common.utils.{Time, Utils}
 
@@ -140,7 +140,7 @@ class GroupMetadataManager(brokerId: Int,
     scheduler.startup()
     if (enableMetadataExpiration) {
       scheduler.schedule(name = "delete-expired-group-metadata",
-        fun = cleanupGroupMetadata,
+        fun = () => cleanupGroupMetadata,
         period = config.offsetsRetentionCheckIntervalMs,
         unit = TimeUnit.MILLISECONDS)
     }
@@ -691,7 +691,7 @@ class GroupMetadataManager(brokerId: Int,
                                onGroupUnloaded: GroupMetadata => Unit) {
     val topicPartition = new TopicPartition(Topic.GROUP_METADATA_TOPIC_NAME, offsetsPartition)
     info(s"Scheduling unloading of offsets and group metadata from $topicPartition")
-    scheduler.schedule(topicPartition.toString, removeGroupsAndOffsets)
+    scheduler.schedule(topicPartition.toString, () => removeGroupsAndOffsets)
 
     def removeGroupsAndOffsets() {
       var numOffsetsRemoved = 0
@@ -1273,7 +1273,10 @@ object GroupMetadataManager {
         val commitTimestamp = value.get(OFFSET_VALUE_COMMIT_TIMESTAMP_FIELD_V1).asInstanceOf[Long]
         val expireTimestamp = value.get(OFFSET_VALUE_EXPIRE_TIMESTAMP_FIELD_V1).asInstanceOf[Long]
 
-        OffsetAndMetadata(offset, metadata, commitTimestamp, expireTimestamp)
+        if (expireTimestamp == OffsetCommitRequest.DEFAULT_TIMESTAMP)
+          OffsetAndMetadata(offset, metadata, commitTimestamp)
+        else
+          OffsetAndMetadata(offset, metadata, commitTimestamp, expireTimestamp)
       } else if (version == 2) {
         val offset = value.get(OFFSET_VALUE_OFFSET_FIELD_V2).asInstanceOf[Long]
         val metadata = value.get(OFFSET_VALUE_METADATA_FIELD_V2).asInstanceOf[String]

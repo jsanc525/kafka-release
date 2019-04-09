@@ -56,6 +56,7 @@ import org.apache.kafka.common.errors.InvalidTopicException;
 import org.apache.kafka.common.errors.RetriableException;
 import org.apache.kafka.common.errors.TimeoutException;
 import org.apache.kafka.common.errors.UnknownServerException;
+import org.apache.kafka.common.errors.UnknownTopicOrPartitionException;
 import org.apache.kafka.common.errors.UnsupportedVersionException;
 import org.apache.kafka.common.internals.KafkaFutureImpl;
 import org.apache.kafka.common.metrics.JmxReporter;
@@ -104,6 +105,8 @@ import org.apache.kafka.common.requests.DescribeGroupsRequest;
 import org.apache.kafka.common.requests.DescribeGroupsResponse;
 import org.apache.kafka.common.requests.DescribeLogDirsRequest;
 import org.apache.kafka.common.requests.DescribeLogDirsResponse;
+import org.apache.kafka.common.requests.ElectPreferredLeadersRequest;
+import org.apache.kafka.common.requests.ElectPreferredLeadersResponse;
 import org.apache.kafka.common.requests.ExpireDelegationTokenRequest;
 import org.apache.kafka.common.requests.ExpireDelegationTokenResponse;
 import org.apache.kafka.common.requests.FindCoordinatorRequest;
@@ -125,6 +128,7 @@ import org.apache.kafka.common.utils.Time;
 import org.slf4j.Logger;
 
 import java.net.InetSocketAddress;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -339,6 +343,10 @@ public class KafkaAdminClient extends AdminClient {
             AdminMetadataManager metadataManager = new AdminMetadataManager(logContext,
                 config.getLong(AdminClientConfig.RETRY_BACKOFF_MS_CONFIG),
                 config.getLong(AdminClientConfig.METADATA_MAX_AGE_CONFIG));
+            List<InetSocketAddress> addresses = ClientUtils.parseAndValidateAddresses(
+                    config.getList(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG),
+                    config.getString(AdminClientConfig.CLIENT_DNS_LOOKUP_CONFIG));
+            metadataManager.update(Cluster.bootstrap(addresses), time.milliseconds());
             List<MetricsReporter> reporters = config.getConfiguredInstances(AdminClientConfig.METRIC_REPORTER_CLASSES_CONFIG,
                 MetricsReporter.class,
                 Collections.singletonMap(AdminClientConfig.CLIENT_ID_CONFIG, clientId));
@@ -350,7 +358,7 @@ public class KafkaAdminClient extends AdminClient {
             reporters.add(new JmxReporter(JMX_PREFIX));
             metrics = new Metrics(metricConfig, reporters, time);
             String metricGrpPrefix = "admin-client";
-            channelBuilder = ClientUtils.createChannelBuilder(config);
+            channelBuilder = ClientUtils.createChannelBuilder(config, time);
             selector = new Selector(config.getLong(AdminClientConfig.CONNECTIONS_MAX_IDLE_MS_CONFIG),
                     metrics, time, metricGrpPrefix, channelBuilder, logContext);
             networkClient = new NetworkClient(
@@ -375,25 +383,25 @@ public class KafkaAdminClient extends AdminClient {
             closeQuietly(networkClient, "NetworkClient");
             closeQuietly(selector, "Selector");
             closeQuietly(channelBuilder, "ChannelBuilder");
-            throw new KafkaException("Failed create new KafkaAdminClient", exc);
+            throw new KafkaException("Failed to create new KafkaAdminClient", exc);
         }
     }
 
-    static KafkaAdminClient createInternal(AdminClientConfig config, KafkaClient client, Time time) {
+    static KafkaAdminClient createInternal(AdminClientConfig config,
+                                           AdminMetadataManager metadataManager,
+                                           KafkaClient client,
+                                           Time time) {
         Metrics metrics = null;
         String clientId = generateClientId(config);
 
         try {
             metrics = new Metrics(new MetricConfig(), new LinkedList<>(), time);
             LogContext logContext = createLogContext(clientId);
-            AdminMetadataManager metadataManager = new AdminMetadataManager(logContext,
-                config.getLong(AdminClientConfig.RETRY_BACKOFF_MS_CONFIG),
-                config.getLong(AdminClientConfig.METADATA_MAX_AGE_CONFIG));
             return new KafkaAdminClient(config, clientId, time, metadataManager, metrics,
                 client, null, logContext);
         } catch (Throwable exc) {
             closeQuietly(metrics, "Metrics");
-            throw new KafkaException("Failed create new KafkaAdminClient", exc);
+            throw new KafkaException("Failed to create new KafkaAdminClient", exc);
         }
     }
 
@@ -414,10 +422,6 @@ public class KafkaAdminClient extends AdminClient {
         this.log = logContext.logger(KafkaAdminClient.class);
         this.time = time;
         this.metadataManager = metadataManager;
-        List<InetSocketAddress> addresses = ClientUtils.parseAndValidateAddresses(
-            config.getList(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG),
-            config.getString(AdminClientConfig.CLIENT_DNS_LOOKUP_CONFIG));
-        metadataManager.update(Cluster.bootstrap(addresses), time.milliseconds());
         this.metrics = metrics;
         this.client = client;
         this.runnable = new AdminClientRunnable();
@@ -438,8 +442,10 @@ public class KafkaAdminClient extends AdminClient {
     }
 
     @Override
-    public void close(long duration, TimeUnit unit) {
-        long waitTimeMs = unit.toMillis(duration);
+    public void close(Duration timeout) {
+        long waitTimeMs = timeout.toMillis();
+        if (waitTimeMs < 0)
+            throw new IllegalArgumentException("The timeout cannot be negative.");
         waitTimeMs = Math.min(TimeUnit.DAYS.toMillis(365), waitTimeMs); // Limit the timeout to a year.
         long now = time.milliseconds();
         long newHardShutdownTimeMs = now + waitTimeMs;
@@ -1399,12 +1405,12 @@ public class KafkaAdminClient extends AdminClient {
             @Override
             void handleResponse(AbstractResponse abstractResponse) {
                 MetadataResponse response = (MetadataResponse) abstractResponse;
-                Cluster cluster = response.cluster();
                 Map<String, TopicListing> topicListing = new HashMap<>();
-                for (String topicName : cluster.topics()) {
-                    boolean internal = cluster.internalTopics().contains(topicName);
-                    if (!internal || options.shouldListInternal())
-                        topicListing.put(topicName, new TopicListing(topicName, internal));
+                for (MetadataResponse.TopicMetadata topicMetadata : response.topicMetadata()) {
+                    String topicName = topicMetadata.topic();
+                    boolean isInternal = topicMetadata.isInternal();
+                    if (!topicMetadata.isInternal() || options.shouldListInternal())
+                        topicListing.put(topicName, new TopicListing(topicName, isInternal));
                 }
                 topicListingFuture.complete(topicListing);
             }
@@ -1461,7 +1467,7 @@ public class KafkaAdminClient extends AdminClient {
                         continue;
                     }
                     if (!cluster.topics().contains(topicName)) {
-                        future.completeExceptionally(new InvalidTopicException("Topic " + topicName + " not found."));
+                        future.completeExceptionally(new UnknownTopicOrPartitionException("Topic " + topicName + " not found."));
                         continue;
                     }
                     boolean isInternal = cluster.internalTopics().contains(topicName);
@@ -2551,12 +2557,11 @@ public class KafkaAdminClient extends AdminClient {
             @Override
             void handleResponse(AbstractResponse abstractResponse) {
                 MetadataResponse metadataResponse = (MetadataResponse) abstractResponse;
-                Cluster cluster = metadataResponse.cluster();
-
-                if (cluster.nodes().isEmpty())
+                Collection<Node> nodes = metadataResponse.brokers();
+                if (nodes.isEmpty())
                     throw new StaleMetadataException("Metadata fetch failed due to missing broker list");
 
-                HashSet<Node> allNodes = new HashSet<>(cluster.nodes());
+                HashSet<Node> allNodes = new HashSet<>(nodes);
                 final ListConsumerGroupsResults results = new ListConsumerGroupsResults(allNodes, all);
 
                 for (final Node node : allNodes) {
@@ -2774,4 +2779,35 @@ public class KafkaAdminClient extends AdminClient {
     public Map<MetricName, ? extends Metric> metrics() {
         return Collections.unmodifiableMap(this.metrics.metrics());
     }
+
+    @Override
+    public ElectPreferredLeadersResult electPreferredLeaders(final Collection<TopicPartition> partitions,
+                                                             ElectPreferredLeadersOptions options) {
+        final Set<TopicPartition> partitionSet = partitions != null ? new HashSet<>(partitions) : null;
+        final KafkaFutureImpl<Map<TopicPartition, ApiError>> electionFuture = new KafkaFutureImpl<>();
+        final long now = time.milliseconds();
+        runnable.call(new Call("electPreferredLeaders", calcDeadlineMs(now, options.timeoutMs()),
+                new ControllerNodeProvider()) {
+
+            @Override
+            public AbstractRequest.Builder createRequest(int timeoutMs) {
+                return new ElectPreferredLeadersRequest.Builder(
+                        ElectPreferredLeadersRequest.toRequestData(partitions, timeoutMs));
+            }
+
+            @Override
+            public void handleResponse(AbstractResponse abstractResponse) {
+                ElectPreferredLeadersResponse response = (ElectPreferredLeadersResponse) abstractResponse;
+                electionFuture.complete(
+                        ElectPreferredLeadersRequest.fromResponseData(response.data()));
+            }
+
+            @Override
+            void handleFailure(Throwable throwable) {
+                electionFuture.completeExceptionally(throwable);
+            }
+        }, now);
+        return new ElectPreferredLeadersResult(electionFuture, partitionSet);
+    }
+
 }

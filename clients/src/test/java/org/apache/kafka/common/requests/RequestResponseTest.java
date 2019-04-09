@@ -32,6 +32,13 @@ import org.apache.kafka.common.errors.NotEnoughReplicasException;
 import org.apache.kafka.common.errors.SecurityDisabledException;
 import org.apache.kafka.common.errors.UnknownServerException;
 import org.apache.kafka.common.errors.UnsupportedVersionException;
+import org.apache.kafka.common.message.ElectPreferredLeadersRequestData;
+import org.apache.kafka.common.message.ElectPreferredLeadersRequestData.TopicPartitions;
+import org.apache.kafka.common.message.ElectPreferredLeadersResponseData;
+import org.apache.kafka.common.message.ElectPreferredLeadersResponseData.PartitionResult;
+import org.apache.kafka.common.message.ElectPreferredLeadersResponseData.ReplicaElectionResult;
+import org.apache.kafka.common.message.LeaveGroupRequestData;
+import org.apache.kafka.common.message.LeaveGroupResponseData;
 import org.apache.kafka.common.network.ListenerName;
 import org.apache.kafka.common.network.Send;
 import org.apache.kafka.common.protocol.ApiKeys;
@@ -157,16 +164,25 @@ public class RequestResponseTest {
         checkRequest(createProduceRequest(3));
         checkErrorResponse(createProduceRequest(3), new UnknownServerException());
         checkResponse(createProduceResponse(), 2);
-        checkRequest(createStopReplicaRequest(true));
-        checkRequest(createStopReplicaRequest(false));
-        checkErrorResponse(createStopReplicaRequest(true), new UnknownServerException());
+        checkRequest(createStopReplicaRequest(0, true));
+        checkRequest(createStopReplicaRequest(0, false));
+        checkErrorResponse(createStopReplicaRequest(0, true), new UnknownServerException());
+        checkRequest(createStopReplicaRequest(1, true));
+        checkRequest(createStopReplicaRequest(1, false));
+        checkErrorResponse(createStopReplicaRequest(1, true), new UnknownServerException());
         checkResponse(createStopReplicaResponse(), 0);
-        checkRequest(createLeaderAndIsrRequest());
-        checkErrorResponse(createLeaderAndIsrRequest(), new UnknownServerException());
+        checkRequest(createLeaderAndIsrRequest(0));
+        checkErrorResponse(createLeaderAndIsrRequest(0), new UnknownServerException());
+        checkRequest(createLeaderAndIsrRequest(1));
+        checkErrorResponse(createLeaderAndIsrRequest(1), new UnknownServerException());
         checkResponse(createLeaderAndIsrResponse(), 0);
         checkRequest(createSaslHandshakeRequest());
         checkErrorResponse(createSaslHandshakeRequest(), new UnknownServerException());
         checkResponse(createSaslHandshakeResponse(), 0);
+        checkRequest(createSaslAuthenticateRequest());
+        checkErrorResponse(createSaslAuthenticateRequest(), new UnknownServerException());
+        checkResponse(createSaslAuthenticateResponse(), 0);
+        checkResponse(createSaslAuthenticateResponse(), 1);
         checkRequest(createApiVersionRequest());
         checkErrorResponse(createApiVersionRequest(), new UnknownServerException());
         checkResponse(createApiVersionResponse(), 0);
@@ -230,6 +246,12 @@ public class RequestResponseTest {
         checkRequest(createUpdateMetadataRequest(3, "rack1"));
         checkRequest(createUpdateMetadataRequest(3, null));
         checkErrorResponse(createUpdateMetadataRequest(3, "rack1"), new UnknownServerException());
+        checkRequest(createUpdateMetadataRequest(4, "rack1"));
+        checkRequest(createUpdateMetadataRequest(4, null));
+        checkErrorResponse(createUpdateMetadataRequest(4, "rack1"), new UnknownServerException());
+        checkRequest(createUpdateMetadataRequest(5, "rack1"));
+        checkRequest(createUpdateMetadataRequest(5, null));
+        checkErrorResponse(createUpdateMetadataRequest(5, "rack1"), new UnknownServerException());
         checkResponse(createUpdateMetadataResponse(), 0);
         checkRequest(createListOffsetRequest(0));
         checkErrorResponse(createListOffsetRequest(0), new UnknownServerException());
@@ -289,6 +311,10 @@ public class RequestResponseTest {
         checkRequest(createRenewTokenRequest());
         checkErrorResponse(createRenewTokenRequest(), new UnknownServerException());
         checkResponse(createRenewTokenResponse(), 0);
+        checkRequest(createElectPreferredLeadersRequest());
+        checkRequest(createElectPreferredLeadersRequestNullPartitions());
+        checkErrorResponse(createElectPreferredLeadersRequest(), new UnknownServerException());
+        checkResponse(createElectPreferredLeadersResponse(), 0);
     }
 
     @Test
@@ -345,9 +371,19 @@ public class RequestResponseTest {
     private void checkRequest(AbstractRequest req) throws Exception {
         // Check that we can serialize, deserialize and serialize again
         // We don't check for equality or hashCode because it is likely to fail for any request containing a HashMap
+        checkRequest(req, false);
+    }
+
+    private void checkRequest(AbstractRequest req, boolean checkEqualityAndHashCode) throws Exception {
+        // Check that we can serialize, deserialize and serialize again
+        // Check for equality and hashCode only if indicated
         Struct struct = req.toStruct();
         AbstractRequest deserialized = (AbstractRequest) deserialize(req, struct, req.version());
-        deserialized.toStruct();
+        Struct struct2 = deserialized.toStruct();
+        if (checkEqualityAndHashCode) {
+            assertEquals(struct, struct2);
+            assertEquals(struct.hashCode(), struct2.hashCode());
+        }
     }
 
     private void checkResponse(AbstractResponse response, int version) throws Exception {
@@ -355,7 +391,7 @@ public class RequestResponseTest {
         // We don't check for equality or hashCode because it is likely to fail for any response containing a HashMap
         Struct struct = response.toStruct((short) version);
         AbstractResponse deserialized = (AbstractResponse) deserialize(response, struct, (short) version);
-        deserialized.toStruct((short) version);
+        Struct struct2 = deserialized.toStruct((short) version);
     }
 
     private AbstractRequestResponse deserialize(AbstractRequestResponse req, Struct struct, short version) throws NoSuchMethodException, IllegalAccessException, InvocationTargetException {
@@ -435,7 +471,7 @@ public class RequestResponseTest {
         Struct deserializedStruct = ApiKeys.PRODUCE.parseResponse(version, buffer);
 
         ProduceResponse v5FromBytes = (ProduceResponse) AbstractResponse.parseResponse(ApiKeys.PRODUCE,
-                deserializedStruct);
+                deserializedStruct, version);
 
         assertEquals(1, v5FromBytes.responses().size());
         assertTrue(v5FromBytes.responses().containsKey(tp0));
@@ -738,11 +774,11 @@ public class RequestResponseTest {
     }
 
     private LeaveGroupRequest createLeaveGroupRequest() {
-        return new LeaveGroupRequest.Builder("group1", "consumer1").build();
+        return new LeaveGroupRequest.Builder(new LeaveGroupRequestData().setGroupId("group1").setMemberId("consumer1")).build();
     }
 
     private LeaveGroupResponse createLeaveGroupResponse() {
-        return new LeaveGroupResponse(Errors.NONE);
+        return new LeaveGroupResponse(new LeaveGroupResponseData().setErrorCode(Errors.NONE.code()));
     }
 
     private DeleteGroupsRequest createDeleteGroupsRequest() {
@@ -826,6 +862,7 @@ public class RequestResponseTest {
         return new MetadataResponse(asList(node), null, MetadataResponse.NO_CONTROLLER_ID, allTopicMetadata);
     }
 
+    @SuppressWarnings("deprecation")
     private OffsetCommitRequest createOffsetCommitRequest(int version) {
         Map<TopicPartition, OffsetCommitRequest.PartitionData> commitData = new HashMap<>();
         commitData.put(new TopicPartition("test", 0), new OffsetCommitRequest.PartitionData(100,
@@ -876,9 +913,9 @@ public class RequestResponseTest {
         return new ProduceResponse(responseData, 0);
     }
 
-    private StopReplicaRequest createStopReplicaRequest(boolean deletePartitions) {
+    private StopReplicaRequest createStopReplicaRequest(int version, boolean deletePartitions) {
         Set<TopicPartition> partitions = Utils.mkSet(new TopicPartition("test", 0));
-        return new StopReplicaRequest.Builder(0, 1, deletePartitions, partitions).build();
+        return new StopReplicaRequest.Builder((short) version, 0, 1, 0, deletePartitions, partitions).build();
     }
 
     private StopReplicaResponse createStopReplicaResponse() {
@@ -888,11 +925,11 @@ public class RequestResponseTest {
     }
 
     private ControlledShutdownRequest createControlledShutdownRequest() {
-        return new ControlledShutdownRequest.Builder(10, ApiKeys.CONTROLLED_SHUTDOWN.latestVersion()).build();
+        return new ControlledShutdownRequest.Builder(10, 0, ApiKeys.CONTROLLED_SHUTDOWN.latestVersion()).build();
     }
 
     private ControlledShutdownRequest createControlledShutdownRequest(int version) {
-        return new ControlledShutdownRequest.Builder(10, ApiKeys.CONTROLLED_SHUTDOWN.latestVersion()).build((short) version);
+        return new ControlledShutdownRequest.Builder(10, 0, ApiKeys.CONTROLLED_SHUTDOWN.latestVersion()).build((short) version);
     }
 
     private ControlledShutdownResponse createControlledShutdownResponse() {
@@ -903,7 +940,7 @@ public class RequestResponseTest {
         return new ControlledShutdownResponse(Errors.NONE, topicPartitions);
     }
 
-    private LeaderAndIsrRequest createLeaderAndIsrRequest() {
+    private LeaderAndIsrRequest createLeaderAndIsrRequest(int version) {
         Map<TopicPartition, LeaderAndIsrRequest.PartitionState> partitionStates = new HashMap<>();
         List<Integer> isr = asList(1, 2);
         List<Integer> replicas = asList(1, 2, 3, 4);
@@ -918,7 +955,7 @@ public class RequestResponseTest {
                 new Node(0, "test0", 1223),
                 new Node(1, "test1", 1223)
         );
-        return new LeaderAndIsrRequest.Builder(ApiKeys.LEADER_AND_ISR.latestVersion(), 1, 10, partitionStates, leaders).build();
+        return new LeaderAndIsrRequest.Builder((short) version, 1, 10, 0, partitionStates, leaders).build();
     }
 
     private LeaderAndIsrResponse createLeaderAndIsrResponse() {
@@ -959,7 +996,7 @@ public class RequestResponseTest {
                 new UpdateMetadataRequest.Broker(0, endPoints1, rack),
                 new UpdateMetadataRequest.Broker(1, endPoints2, rack)
         );
-        return new UpdateMetadataRequest.Builder((short) version, 1, 10, partitionStates,
+        return new UpdateMetadataRequest.Builder((short) version, 1, 10, 0, partitionStates,
                 liveBrokers).build();
     }
 
@@ -973,6 +1010,14 @@ public class RequestResponseTest {
 
     private SaslHandshakeResponse createSaslHandshakeResponse() {
         return new SaslHandshakeResponse(Errors.NONE, singletonList("GSSAPI"));
+    }
+
+    private SaslAuthenticateRequest createSaslAuthenticateRequest() {
+        return new SaslAuthenticateRequest(ByteBuffer.wrap(new byte[0]));
+    }
+
+    private SaslAuthenticateResponse createSaslAuthenticateResponse() {
+        return new SaslAuthenticateResponse(Errors.NONE, null, ByteBuffer.wrap(new byte[0]), Long.MAX_VALUE);
     }
 
     private ApiVersionsRequest createApiVersionRequest() {
@@ -1288,4 +1333,33 @@ public class RequestResponseTest {
 
         return new DescribeDelegationTokenResponse(20, Errors.NONE, tokenList);
     }
+
+    private ElectPreferredLeadersRequest createElectPreferredLeadersRequestNullPartitions() {
+        return new ElectPreferredLeadersRequest.Builder(
+                new ElectPreferredLeadersRequestData()
+                        .setTimeoutMs(100)
+                        .setTopicPartitions(null))
+                .build((short) 0);
+    }
+
+    private ElectPreferredLeadersRequest createElectPreferredLeadersRequest() {
+        ElectPreferredLeadersRequestData data = new ElectPreferredLeadersRequestData()
+                .setTimeoutMs(100);
+        data.topicPartitions().add(new TopicPartitions().setTopic("data").setPartitionId(asList(1, 2)));
+        return new ElectPreferredLeadersRequest.Builder(data).build((short) 0);
+    }
+
+    private ElectPreferredLeadersResponse createElectPreferredLeadersResponse() {
+        ElectPreferredLeadersResponseData data = new ElectPreferredLeadersResponseData().setThrottleTimeMs(200);
+        ReplicaElectionResult resultsByTopic = new ReplicaElectionResult().setTopic("myTopic");
+        resultsByTopic.partitionResult().add(new PartitionResult().setPartitionId(0)
+                .setErrorCode(Errors.NONE.code())
+                .setErrorMessage(Errors.NONE.message()));
+        resultsByTopic.partitionResult().add(new PartitionResult().setPartitionId(1)
+                .setErrorCode(Errors.UNKNOWN_TOPIC_OR_PARTITION.code())
+                .setErrorMessage(Errors.UNKNOWN_TOPIC_OR_PARTITION.message()));
+        data.replicaElectionResults().add(resultsByTopic);
+        return new ElectPreferredLeadersResponse(data);
+    }
+
 }

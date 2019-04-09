@@ -183,16 +183,17 @@ public class MockConsumer<K, V> implements Consumer<K, V> {
 
         // update the consumed offset
         final Map<TopicPartition, List<ConsumerRecord<K, V>>> results = new HashMap<>();
-        for (final TopicPartition topicPartition : records.keySet()) {
-            results.put(topicPartition, new ArrayList<>());
-        }
 
         for (Map.Entry<TopicPartition, List<ConsumerRecord<K, V>>> entry : this.records.entrySet()) {
             if (!subscriptions.isPaused(entry.getKey())) {
                 final List<ConsumerRecord<K, V>> recs = entry.getValue();
                 for (final ConsumerRecord<K, V> rec : recs) {
+                    if (beginningOffsets.get(entry.getKey()) != null && beginningOffsets.get(entry.getKey()) > subscriptions.position(entry.getKey())) {
+                        throw new OffsetOutOfRangeException(Collections.singletonMap(entry.getKey(), subscriptions.position(entry.getKey())));
+                    }
+
                     if (assignment().contains(entry.getKey()) && rec.offset() >= subscriptions.position(entry.getKey())) {
-                        results.get(entry.getKey()).add(rec);
+                        results.computeIfAbsent(entry.getKey(), partition -> new ArrayList<>()).add(rec);
                         subscriptions.position(entry.getKey(), rec.offset() + 1);
                     }
                 }
@@ -261,6 +262,12 @@ public class MockConsumer<K, V> implements Consumer<K, V> {
     public synchronized void seek(TopicPartition partition, long offset) {
         ensureNotClosed();
         subscriptions.seek(partition, offset);
+    }
+
+    @Override
+    public void seek(TopicPartition partition, OffsetAndMetadata offsetAndMetadata) {
+        ensureNotClosed();
+        subscriptions.seek(partition, offsetAndMetadata.offset());
     }
 
     @Override
@@ -408,6 +415,7 @@ public class MockConsumer<K, V> implements Consumer<K, V> {
         close(KafkaConsumer.DEFAULT_CLOSE_TIMEOUT_MS, TimeUnit.MILLISECONDS);
     }
 
+    @SuppressWarnings("deprecation")
     @Override
     public synchronized void close(long timeout, TimeUnit unit) {
         ensureNotClosed();
