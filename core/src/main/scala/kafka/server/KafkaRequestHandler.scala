@@ -264,7 +264,7 @@ class ProducerStats(producerCacheMaxSize: Int, producerCacheExpiryMs: Long) exte
   private def removeMetrics(clientId: String, partitions: util.Collection[TopicPartition]) = {
     debug(s"Removing clientId: $clientId with partitions: $partitions")
     if (partitions != null && !partitions.isEmpty) {
-      JavaConverters.collectionAsScalaIterable(partitions).foreach(tp => {
+      JavaConverters.collectionAsScalaIterableConverter(partitions).asScala.foreach(tp => {
         val metrics = clientMetrics.remove((clientId, tp))
         if (metrics != null) metrics.close()
       })
