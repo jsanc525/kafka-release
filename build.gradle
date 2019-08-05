@@ -568,6 +568,7 @@ project(':core') {
       exclude module: 'slf4j-log4j12'
       exclude module: 'log4j'
       exclude module: 'netty'
+      exclude module: 'spotbugs-annotations'
     }
 
     compileOnly libs.log4j
