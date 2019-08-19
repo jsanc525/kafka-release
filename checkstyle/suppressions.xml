@@ -212,6 +212,6 @@
     <suppress checks="NPathComplexity"
               files="KafkaLog4jAppender.java"/>
     <suppress checks="JavaNCSS"
-              files="RequestResponseTest.java"/>
+              files="RequestResponseTest.java|FetcherTest.java"/>
 
 </suppressions>
