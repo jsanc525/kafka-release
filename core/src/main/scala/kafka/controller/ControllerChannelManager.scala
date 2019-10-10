@@ -291,6 +291,13 @@ class RequestSendThread(val controllerId: Int,
     }
   }
 
+  override def initiateShutdown(): Boolean = {
+    if (super.initiateShutdown()) {
+      networkClient.initiateClose()
+      true
+    } else
+      false
+  }
 }
 
 class ControllerBrokerRequestBatch(controller: KafkaController, stateChangeLogger: StateChangeLogger) extends  Logging {
@@ -312,7 +319,7 @@ class ControllerBrokerRequestBatch(controller: KafkaController, stateChangeLogge
     if (updateMetadataRequestBrokerSet.nonEmpty)
       throw new IllegalStateException("Controller to broker state change requests batch is not empty while creating a " +
         s"new one. Some UpdateMetadata state changes to brokers $updateMetadataRequestBrokerSet with partition info " +
-        s"updateMetadataRequestPartitionInfoMap might be lost ")
+        s"$updateMetadataRequestPartitionInfoMap might be lost ")
   }
 
   def clear() {
