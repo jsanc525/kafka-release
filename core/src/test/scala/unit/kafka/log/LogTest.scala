@@ -168,8 +168,8 @@ class LogTest {
     log.appendAsFollower(records2)
 
     assertEquals("Expect two records in the log", 2, log.logEndOffset)
-    assertEquals(0, readLog(log, 0, 100, Some(1)).records.batches.iterator.next().lastOffset)
-    assertEquals(1, readLog(log, 1, 100, Some(2)).records.batches.iterator.next().lastOffset)
+    assertEquals(0, log.readUncommitted(0, 100, Some(1)).records.batches.iterator.next().lastOffset)
+    assertEquals(1, log.readUncommitted(1, 100, Some(2)).records.batches.iterator.next().lastOffset)
 
     // roll so that active segment is empty
     log.roll()
@@ -183,7 +183,7 @@ class LogTest {
       baseOffset = 2L, partitionLeaderEpoch = 0)
     log.appendAsFollower(records3)
     assertTrue(log.activeSegment.offsetIndex.maxEntries > 1)
-    assertEquals(2, readLog(log, 2, 100, Some(3)).records.batches.iterator.next().lastOffset)
+    assertEquals(2, log.readUncommitted(2, 100, Some(3)).records.batches.iterator.next().lastOffset)
     assertEquals("Expect two segments.", 2, log.numberOfSegments)
   }
 
