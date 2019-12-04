@@ -1,2 +1,8 @@
 Changes only in Hortonworks github and not in Apache Kafka release 2.0 and hence not covered in release notes https://www.apache.org/dist/kafka/2.0.0/RELEASE_NOTES.html
+* BUG-120664: Upgrade Jackson to 2.9.9
+* BUG-120671: Upgrade Jetty to 9.4.18
+* BUG-120911: Upgrade ZooKeeper to 3.4.14
+* BUG-121259 Upgrade jackson-databind to 2.9.9.1
+* BUG-121384: Exclude SpotBugs-annotations 3.1.9 lib
+* BUG-122097 Update jackson-databind to version 2.10.0
 
