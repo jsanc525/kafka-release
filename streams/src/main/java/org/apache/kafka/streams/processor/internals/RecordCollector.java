@@ -24,7 +24,7 @@ import org.apache.kafka.streams.processor.StreamPartitioner;
 
 import java.util.Map;
 
-public interface RecordCollector {
+public interface RecordCollector extends AutoCloseable {
 
     <K, V> void send(final String topic,
                      final K key,
@@ -63,7 +63,7 @@ public interface RecordCollector {
     /**
      * The last acked offsets from the internal {@link Producer}.
      *
-     * @return the map from TopicPartition to offset
+     * @return an immutable map from TopicPartition to offset
      */
     Map<TopicPartition, Long> offsets();
 

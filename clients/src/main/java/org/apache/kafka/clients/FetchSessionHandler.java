@@ -196,8 +196,10 @@ public class FetchSessionHandler {
 
         public FetchRequestData build() {
             if (nextMetadata.isFull()) {
-                log.debug("Built full fetch {} for node {} with {}.",
-                    nextMetadata, node, partitionsToLogString(next.keySet()));
+                if (log.isDebugEnabled()) {
+                    log.debug("Built full fetch {} for node {} with {}.",
+                              nextMetadata, node, partitionsToLogString(next.keySet()));
+                }
                 sessionPartitions = next;
                 next = null;
                 Map<TopicPartition, PartitionData> toSend =
@@ -247,10 +249,12 @@ public class FetchSessionHandler {
                 sessionPartitions.put(topicPartition, nextData);
                 added.add(topicPartition);
             }
-            log.debug("Built incremental fetch {} for node {}. Added {}, altered {}, removed {} " +
-                    "out of {}", nextMetadata, node, partitionsToLogString(added),
-                    partitionsToLogString(altered), partitionsToLogString(removed),
-                    partitionsToLogString(sessionPartitions.keySet()));
+            if (log.isDebugEnabled()) {
+                log.debug("Built incremental fetch {} for node {}. Added {}, altered {}, removed {} " +
+                          "out of {}", nextMetadata, node, partitionsToLogString(added),
+                          partitionsToLogString(altered), partitionsToLogString(removed),
+                          partitionsToLogString(sessionPartitions.keySet()));
+            }
             Map<TopicPartition, PartitionData> toSend =
                 Collections.unmodifiableMap(new LinkedHashMap<>(next));
             Map<TopicPartition, PartitionData> curSessionPartitions =
@@ -296,7 +300,7 @@ public class FetchSessionHandler {
      * @param response  The response.
      * @return          True if the full fetch response partitions are valid.
      */
-    private String verifyFullFetchResponsePartitions(FetchResponse response) {
+    private String verifyFullFetchResponsePartitions(FetchResponse<?> response) {
         StringBuilder bld = new StringBuilder();
         Set<TopicPartition> omitted =
             findMissing(response.responseData().keySet(), sessionPartitions.keySet());
@@ -321,7 +325,7 @@ public class FetchSessionHandler {
      * @param response  The response.
      * @return          True if the incremental fetch response partitions are valid.
      */
-    private String verifyIncrementalFetchResponsePartitions(FetchResponse response) {
+    private String verifyIncrementalFetchResponsePartitions(FetchResponse<?> response) {
         Set<TopicPartition> extra =
             findMissing(response.responseData().keySet(), sessionPartitions.keySet());
         if (!extra.isEmpty()) {
@@ -340,7 +344,7 @@ public class FetchSessionHandler {
      * @param response  The FetchResponse.
      * @return          The string to log.
      */
-    private String responseDataToLogString(FetchResponse response) {
+    private String responseDataToLogString(FetchResponse<?> response) {
         if (!log.isTraceEnabled()) {
             int implied = sessionPartitions.size() - response.responseData().size();
             if (implied > 0) {
@@ -376,7 +380,7 @@ public class FetchSessionHandler {
      * @return          True if the response is well-formed; false if it can't be processed
      *                  because of missing or unexpected partitions.
      */
-    public boolean handleResponse(FetchResponse response) {
+    public boolean handleResponse(FetchResponse<?> response) {
         if (response.error() != Errors.NONE) {
             log.info("Node {} was unable to process the fetch request with {}: {}.",
                 node, nextMetadata, response.error());

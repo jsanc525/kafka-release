@@ -22,7 +22,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.nio.ByteBuffer;
-import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.Set;
@@ -171,7 +171,7 @@ public class SubscriptionInfo {
         if (userEndPoint == null) {
             return new byte[0];
         } else {
-            return userEndPoint.getBytes(Charset.forName("UTF-8"));
+            return userEndPoint.getBytes(StandardCharsets.UTF_8);
         }
     }
 
@@ -207,11 +207,10 @@ public class SubscriptionInfo {
 
     private ByteBuffer encodeVersionThree() {
         final byte[] endPointBytes = prepareUserEndPoint();
-
         final ByteBuffer buf = ByteBuffer.allocate(getVersionThreeAndFourByteLength(endPointBytes));
+        buf.putInt(3);
+        buf.putInt(latestSupportedVersion);
 
-        buf.putInt(3); // used version
-        buf.putInt(LATEST_SUPPORTED_VERSION); // supported version
         encodeClientUUID(buf);
         encodeTasks(buf, prevTasks);
         encodeTasks(buf, standbyTasks);
@@ -226,7 +225,7 @@ public class SubscriptionInfo {
         final ByteBuffer buf = ByteBuffer.allocate(getVersionThreeAndFourByteLength(endPointBytes));
 
         buf.putInt(4); // used version
-        buf.putInt(LATEST_SUPPORTED_VERSION); // supported version
+        buf.putInt(latestSupportedVersion); // supported version
         encodeClientUUID(buf);
         encodeTasks(buf, prevTasks);
         encodeTasks(buf, standbyTasks);
@@ -273,7 +272,7 @@ public class SubscriptionInfo {
             default:
                 latestSupportedVersion = data.getInt();
                 subscriptionInfo = new SubscriptionInfo(usedVersion, latestSupportedVersion);
-                log.info("Unable to decode subscription data: used version: {}; latest supported version: {}", usedVersion, LATEST_SUPPORTED_VERSION);
+                log.info("Unable to decode subscription data: used version: {}; latest supported version: {}", usedVersion, latestSupportedVersion);
         }
 
         return subscriptionInfo;
@@ -318,7 +317,7 @@ public class SubscriptionInfo {
         if (bytesLength != 0) {
             final byte[] bytes = new byte[bytesLength];
             data.get(bytes);
-            subscriptionInfo.userEndPoint = new String(bytes, Charset.forName("UTF-8"));
+            subscriptionInfo.userEndPoint = new String(bytes, StandardCharsets.UTF_8);
         }
     }
 

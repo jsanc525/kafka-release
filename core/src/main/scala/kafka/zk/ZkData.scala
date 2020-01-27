@@ -537,9 +537,13 @@ class ExtendedAclStore(val patternType: PatternType) extends ZkAclStore {
   if (patternType == PatternType.LITERAL)
     throw new IllegalArgumentException("Literal pattern types are not supported")
 
-  val aclPath: String = s"/kafka-acl-extended/${patternType.name.toLowerCase}"
+  val aclPath: String = s"${ExtendedAclZNode.path}/${patternType.name.toLowerCase}"
 
   def changeStore: ZkAclChangeStore = ExtendedAclChangeStore
+}
+
+object ExtendedAclZNode {
+  def path = "/kafka-acl-extended"
 }
 
 trait AclChangeNotificationHandler {
@@ -725,7 +729,8 @@ object ZkData {
     IsrChangeNotificationZNode.path,
     ProducerIdBlockZNode.path,
     LogDirEventNotificationZNode.path,
-    DelegationTokenAuthZNode.path) ++ ZkAclStore.securePaths
+    DelegationTokenAuthZNode.path,
+    ExtendedAclZNode.path) ++ ZkAclStore.securePaths
 
   // These are persistent ZK paths that should exist on kafka broker startup.
   val PersistentZkPaths = Seq(

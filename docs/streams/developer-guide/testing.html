@@ -99,7 +99,7 @@ TopologyTestDriver testDriver = new TopologyTestDriver(topology, props);
             </p>
             <pre>
 ConsumerRecordFactory&lt;String, Integer&gt; factory = new ConsumerRecordFactory&lt;&gt;("input-topic", new StringSerializer(), new IntegerSerializer());
-testDriver.pipe(factory.create("key", 42L));
+testDriver.pipeInput(factory.create("key", 42L));
         </pre>
             <p>
                 To verify the output, the test driver produces <code>ProducerRecord</code>s with key and value type
@@ -255,8 +255,8 @@ public class CustomMaxAggregator implements Processor&lt;String, Long&gt; {
     @Override
     public void init(ProcessorContext context) {
         this.context = context;
-        context.schedule(60000, PunctuationType.WALL_CLOCK_TIME, time -&gt; flushStore());
-        context.schedule(10000, PunctuationType.STREAM_TIME, time -&gt; flushStore());
+        context.schedule(Duration.ofSeconds(60), PunctuationType.WALL_CLOCK_TIME, time -&gt; flushStore());
+        context.schedule(Duration.ofSeconds(10), PunctuationType.STREAM_TIME, time -&gt; flushStore());
         store = (KeyValueStore&lt;String, Long&gt;) context.getStateStore("aggStore");
     }
 

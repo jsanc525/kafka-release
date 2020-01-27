@@ -99,16 +99,16 @@ public class TaskManager {
             throw new IllegalStateException(logPrefix + "consumer has not been initialized while adding stream tasks. This should not happen.");
         }
 
-        changelogReader.reset();
         // do this first as we may have suspended standby tasks that
         // will become active or vice versa
         standby.closeNonAssignedSuspendedTasks(assignedStandbyTasks);
         active.closeNonAssignedSuspendedTasks(assignedActiveTasks);
+
         addStreamTasks(assignment);
         addStandbyTasks();
-        // Pause all the partitions until the underlying state store is ready for all the active tasks.
-        log.trace("Pausing partitions: {}", assignment);
-        consumer.pause(assignment);
+
+        // Pause all the new partitions until the underlying state store is ready for all the active tasks.
+        pausePartitions();
     }
 
     private void addStreamTasks(final Collection<TopicPartition> assignment) {
@@ -208,7 +208,7 @@ public class TaskManager {
                 try {
                     final TaskId id = TaskId.parse(dir.getName());
                     // if the checkpoint file exists, the state is valid.
-                    if (new File(dir, ProcessorStateManager.CHECKPOINT_FILE_NAME).exists()) {
+                    if (new File(dir, StateManagerUtil.CHECKPOINT_FILE_NAME).exists()) {
                         tasks.add(id);
                     }
                 } catch (final TaskIdFormatException e) {
@@ -240,7 +240,14 @@ public class TaskManager {
         final AtomicReference<RuntimeException> firstException = new AtomicReference<>(null);
 
         firstException.compareAndSet(null, active.suspend());
+        // close all restoring tasks as well and then reset changelog reader;
+        // for those restoring and still assigned tasks, they will be re-created
+        // in addStreamTasks.
+        firstException.compareAndSet(null, active.closeAllRestoringTasks());
+        changelogReader.reset();
+
         firstException.compareAndSet(null, standby.suspend());
+
         // remove the changelog partitions from restore consumer
         restoreConsumer.unsubscribe();
 
@@ -310,6 +317,11 @@ public class TaskManager {
         this.consumer = consumer;
     }
 
+    void pausePartitions() {
+        log.trace("Pausing partitions: {}", consumer.assignment());
+        consumer.pause(consumer.assignment());
+    }
+
     /**
      * @throws IllegalStateException If store gets registered after initialized is already finished
      * @throws StreamsException if the store's change log does not contain the partition
@@ -327,7 +339,7 @@ public class TaskManager {
             log.trace("Resuming partitions {}", assignment);
             consumer.resume(assignment);
             assignStandbyPartitions();
-            return true;
+            return standby.allTasksRunning();
         }
         return false;
     }
@@ -368,7 +380,7 @@ public class TaskManager {
     }
 
     public void setAssignmentMetadata(final Map<TaskId, Set<TopicPartition>> activeTasks,
-                               final Map<TaskId, Set<TopicPartition>> standbyTasks) {
+                                      final Map<TaskId, Set<TopicPartition>> standbyTasks) {
         this.assignedActiveTasks = activeTasks;
         this.assignedStandbyTasks = standbyTasks;
     }
@@ -442,9 +454,10 @@ public class TaskManager {
             for (final Map.Entry<TopicPartition, Long> entry : active.recordsToDelete().entrySet()) {
                 recordsToDelete.put(entry.getKey(), RecordsToDelete.beforeOffset(entry.getValue()));
             }
-            deleteRecordsResult = adminClient.deleteRecords(recordsToDelete);
-
-            log.trace("Sent delete-records request: {}", recordsToDelete);
+            if (!recordsToDelete.isEmpty()) {
+                deleteRecordsResult = adminClient.deleteRecords(recordsToDelete);
+                log.trace("Sent delete-records request: {}", recordsToDelete);
+            }
         }
     }
 

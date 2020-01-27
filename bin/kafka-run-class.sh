@@ -20,7 +20,7 @@ then
   exit 1
 fi
 
-# CYGINW == 1 if Cygwin is detected, else 0.
+# CYGWIN == 1 if Cygwin is detected, else 0.
 if [[ $(uname -a) =~ "CYGWIN" ]]; then
   CYGWIN=1
 else
@@ -55,7 +55,7 @@ fi
 base_dir=$(dirname $0)/..
 
 if [ -z "$SCALA_VERSION" ]; then
-  SCALA_VERSION=2.11.12
+  SCALA_VERSION=2.12.8
 fi
 
 if [ -z "$SCALA_BINARY_VERSION" ]; then
@@ -267,13 +267,6 @@ else
         KAFKA_KERBEROS_PARAMS=$KAFKA_CLIENT_KERBEROS_PARAMS
     fi
 fi
-
-# version option
-for args in "$@" ; do
-  if [ "$args" = "--version" ]; then
-    exec $JAVA $KAFKA_HEAP_OPTS $KAFKA_JVM_PERFORMANCE_OPTS $KAFKA_GC_LOG_OPTS $KAFKA_JMX_OPTS $KAFKA_LOG4J_OPTS -cp $CLASSPATH $KAFKA_OPTS "kafka.utils.VersionInfo"
-  fi
-done
 
 while [ $# -gt 0 ]; do
   COMMAND=$1

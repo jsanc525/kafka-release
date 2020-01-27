@@ -105,11 +105,18 @@ object ReplicaVerificationTool extends Logging {
                          .describedAs("ms")
                          .ofType(classOf[java.lang.Long])
                          .defaultsTo(30 * 1000L)
-
-    if (args.length == 0)
-      CommandLineUtils.printUsageAndDie(parser, "Validate that all replicas for a set of topics have the same data.")
+    val helpOpt = parser.accepts("help", "Print usage information.").forHelp()
+    val versionOpt = parser.accepts("version", "Print version information and exit.").forHelp()
 
     val options = parser.parse(args: _*)
+
+    if (args.length == 0 || options.has(helpOpt)) {
+      CommandLineUtils.printUsageAndDie(parser, "Validate that all replicas for a set of topics have the same data.")
+    }
+
+    if (options.has(versionOpt)) {
+      CommandLineUtils.printVersionAndDie()
+    }
     CommandLineUtils.checkRequiredArgs(parser, options, brokerListOpt)
 
     val regex = options.valueOf(topicWhiteListOpt)
@@ -118,7 +125,7 @@ object ReplicaVerificationTool extends Logging {
     try Pattern.compile(regex)
     catch {
       case _: PatternSyntaxException =>
-        throw new RuntimeException(regex + " is an invalid regex.")
+        throw new RuntimeException(s"$regex is an invalid regex.")
     }
 
     val fetchSize = options.valueOf(fetchSizeOpt).intValue
@@ -177,7 +184,7 @@ object ReplicaVerificationTool extends Logging {
     // create all replica fetcher threads
     val verificationBrokerId = brokerToTopicPartitions.head._1
     val counter = new AtomicInteger(0)
-    val fetcherThreads: Iterable[ReplicaFetcher] = brokerToTopicPartitions.map { case (brokerId, topicPartitions) =>
+    val fetcherThreads = brokerToTopicPartitions.map { case (brokerId, topicPartitions) =>
       new ReplicaFetcher(name = s"ReplicaFetcher-$brokerId",
         sourceBroker = brokerInfo(brokerId),
         topicPartitions = topicPartitions,
@@ -199,7 +206,7 @@ object ReplicaVerificationTool extends Logging {
       }
     })
     fetcherThreads.foreach(_.start())
-    println(ReplicaVerificationTool.getCurrentTimeString() + ": verification process is started.")
+    println(s"${ReplicaVerificationTool.getCurrentTimeString()}: verification process is started.")
 
   }
 
@@ -300,7 +307,7 @@ private class ReplicaBuffer(expectedReplicasPerTopicPartition: Map[TopicPartitio
     debug("Begin verification")
     maxLag = -1L
     for ((topicPartition, fetchResponsePerReplica) <- recordsCache) {
-      debug("Verifying " + topicPartition)
+      debug(s"Verifying $topicPartition")
       assert(fetchResponsePerReplica.size == expectedReplicasPerTopicPartition(topicPartition),
         "fetched " + fetchResponsePerReplica.size + " replicas for " + topicPartition + ", but expected "
           + expectedReplicasPerTopicPartition(topicPartition) + " replicas")
@@ -450,7 +457,7 @@ private class ReplicaFetcherBlockingSend(sourceNode: Node,
   private val socketTimeout: Int = consumerConfig.getInt(ConsumerConfig.REQUEST_TIMEOUT_MS_CONFIG)
 
   private val networkClient = {
-    val channelBuilder = org.apache.kafka.clients.ClientUtils.createChannelBuilder(consumerConfig)
+    val channelBuilder = org.apache.kafka.clients.ClientUtils.createChannelBuilder(consumerConfig, time)
     val selector = new Selector(
       NetworkReceive.UNLIMITED,
       consumerConfig.getLong(ConsumerConfig.CONNECTIONS_MAX_IDLE_MS_CONFIG),

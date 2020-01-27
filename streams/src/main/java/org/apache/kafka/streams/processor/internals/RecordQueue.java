@@ -31,12 +31,12 @@ import java.util.ArrayDeque;
 
 /**
  * RecordQueue is a FIFO queue of {@link StampedRecord} (ConsumerRecord + timestamp). It also keeps track of the
- * partition timestamp defined as the minimum timestamp of records in its queue; in addition, its partition
- * timestamp is monotonically increasing such that once it is advanced, it will not be decremented.
+ * partition timestamp defined as the largest timestamp seen on the partition so far; this is passed to the
+ * timestamp extractor.
  */
 public class RecordQueue {
 
-    static final long UNKNOWN = -1L;
+    public static final long UNKNOWN = ConsumerRecord.NO_TIMESTAMP;
 
     private final Logger log;
     private final SourceNode source;
@@ -46,8 +46,8 @@ public class RecordQueue {
     private final RecordDeserializer recordDeserializer;
     private final ArrayDeque<ConsumerRecord<byte[], byte[]>> fifoQueue;
 
-    private long partitionTime = UNKNOWN;
     private StampedRecord headRecord = null;
+    private long partitionTime = RecordQueue.UNKNOWN;
 
     RecordQueue(final TopicPartition partition,
                 final SourceNode source,
@@ -98,7 +98,7 @@ public class RecordQueue {
             fifoQueue.addLast(rawRecord);
         }
 
-        maybeUpdateTimestamp();
+        updateHead();
 
         return size();
     }
@@ -112,7 +112,7 @@ public class RecordQueue {
         final StampedRecord recordToReturn = headRecord;
         headRecord = null;
 
-        maybeUpdateTimestamp();
+        updateHead();
 
         return recordToReturn;
     }
@@ -137,11 +137,20 @@ public class RecordQueue {
     }
 
     /**
-     * Returns the tracked partition timestamp
+     * Returns the head record's timestamp
      *
      * @return timestamp
      */
-    public long timestamp() {
+    public long headRecordTimestamp() {
+        return headRecord == null ? UNKNOWN : headRecord.timestamp;
+    }
+
+    /**
+     * Returns the tracked partition time
+     *
+     * @return partition time
+     */
+    long partitionTime() {
         return partitionTime;
     }
 
@@ -151,10 +160,10 @@ public class RecordQueue {
     public void clear() {
         fifoQueue.clear();
         headRecord = null;
-        partitionTime = UNKNOWN;
+        partitionTime = RecordQueue.UNKNOWN;
     }
 
-    private void maybeUpdateTimestamp() {
+    private void updateHead() {
         while (headRecord == null && !fifoQueue.isEmpty()) {
             final ConsumerRecord<byte[], byte[]> raw = fifoQueue.pollFirst();
             final ConsumerRecord<Object, Object> deserialized = recordDeserializer.deserialize(processorContext, raw);
@@ -188,10 +197,7 @@ public class RecordQueue {
 
             headRecord = new StampedRecord(deserialized, timestamp);
 
-            // update the partition timestamp if the current head record's timestamp has exceed its value
-            if (timestamp > partitionTime) {
-                partitionTime = timestamp;
-            }
+            partitionTime = Math.max(partitionTime, timestamp);
         }
     }
 }

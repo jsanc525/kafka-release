@@ -20,6 +20,7 @@ import org.apache.kafka.common.config.ConfigChangeCallback;
 import org.apache.kafka.common.config.ConfigData;
 import org.apache.kafka.common.config.provider.ConfigProvider;
 import org.easymock.EasyMock;
+import static org.easymock.EasyMock.eq;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -28,9 +29,13 @@ import org.powermock.api.easymock.annotation.Mock;
 import org.powermock.modules.junit4.PowerMockRunner;
 
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 
+import static org.apache.kafka.connect.runtime.ConnectorConfig.CONFIG_RELOAD_ACTION_CONFIG;
+import static org.apache.kafka.connect.runtime.ConnectorConfig.CONFIG_RELOAD_ACTION_NONE;
+import static org.easymock.EasyMock.notNull;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
 import static org.powermock.api.easymock.PowerMock.replayAll;
@@ -61,16 +66,27 @@ public class WorkerConfigTransformerTest {
     }
 
     @Test
-    public void testReplaceVariable() throws Exception {
+    public void testReplaceVariable() {
         Map<String, String> result = configTransformer.transform(MY_CONNECTOR, Collections.singletonMap(MY_KEY, "${test:testPath:testKey}"));
         assertEquals(TEST_RESULT, result.get(MY_KEY));
     }
 
     @Test
-    public void testReplaceVariableWithTTL() throws Exception {
+    public void testReplaceVariableWithTTL() {
         EasyMock.expect(worker.herder()).andReturn(herder);
-        EasyMock.expect(herder.connectorConfigReloadAction(MY_CONNECTOR)).andReturn(Herder.ConfigReloadAction.NONE);
 
+        replayAll();
+
+        Map<String, String> props = new HashMap<>();
+        props.put(MY_KEY, "${test:testPath:testKeyWithTTL}");
+        props.put(CONFIG_RELOAD_ACTION_CONFIG, CONFIG_RELOAD_ACTION_NONE);
+        Map<String, String> result = configTransformer.transform(MY_CONNECTOR, props);
+    }
+
+    @Test
+    public void testReplaceVariableWithTTLAndScheduleRestart() {
+        EasyMock.expect(worker.herder()).andReturn(herder);
+        EasyMock.expect(herder.restartConnector(eq(1L), eq(MY_CONNECTOR), notNull())).andReturn(requestId);
         replayAll();
 
         Map<String, String> result = configTransformer.transform(MY_CONNECTOR, Collections.singletonMap(MY_KEY, "${test:testPath:testKeyWithTTL}"));
@@ -78,29 +94,15 @@ public class WorkerConfigTransformerTest {
     }
 
     @Test
-    public void testReplaceVariableWithTTLAndScheduleRestart() throws Exception {
+    public void testReplaceVariableWithTTLFirstCancelThenScheduleRestart() {
         EasyMock.expect(worker.herder()).andReturn(herder);
-        EasyMock.expect(herder.connectorConfigReloadAction(MY_CONNECTOR)).andReturn(Herder.ConfigReloadAction.RESTART);
-        EasyMock.expect(herder.restartConnector(1L, MY_CONNECTOR, null)).andReturn(requestId);
-
-        replayAll();
-
-        Map<String, String> result = configTransformer.transform(MY_CONNECTOR, Collections.singletonMap(MY_KEY, "${test:testPath:testKeyWithTTL}"));
-        assertEquals(TEST_RESULT_WITH_TTL, result.get(MY_KEY));
-    }
-
-    @Test
-    public void testReplaceVariableWithTTLFirstCancelThenScheduleRestart() throws Exception {
-        EasyMock.expect(worker.herder()).andReturn(herder);
-        EasyMock.expect(herder.connectorConfigReloadAction(MY_CONNECTOR)).andReturn(Herder.ConfigReloadAction.RESTART);
-        EasyMock.expect(herder.restartConnector(1L, MY_CONNECTOR, null)).andReturn(requestId);
+        EasyMock.expect(herder.restartConnector(eq(1L), eq(MY_CONNECTOR), notNull())).andReturn(requestId);
 
         EasyMock.expect(worker.herder()).andReturn(herder);
-        EasyMock.expect(herder.connectorConfigReloadAction(MY_CONNECTOR)).andReturn(Herder.ConfigReloadAction.RESTART);
         EasyMock.expectLastCall();
         requestId.cancel();
         EasyMock.expectLastCall();
-        EasyMock.expect(herder.restartConnector(10L, MY_CONNECTOR, null)).andReturn(requestId);
+        EasyMock.expect(herder.restartConnector(eq(10L), eq(MY_CONNECTOR), notNull())).andReturn(requestId);
 
         replayAll();
 

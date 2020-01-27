@@ -37,7 +37,7 @@ class PlaintextProducerSendTest extends BaseProducerSendTest {
     producerProps.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.StringSerializer")
     producerProps.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.StringSerializer")
     val producer = registerProducer(new KafkaProducer(producerProps))
-    val record = new ProducerRecord[Array[Byte], Array[Byte]](topic, new Integer(0), "key".getBytes, "value".getBytes)
+    val record = new ProducerRecord[Array[Byte], Array[Byte]](topic, 0, "key".getBytes, "value".getBytes)
     producer.send(record)
   }
 
@@ -45,6 +45,7 @@ class PlaintextProducerSendTest extends BaseProducerSendTest {
   def testBatchSizeZero() {
     val producer = createProducer(brokerList = brokerList,
       lingerMs = Int.MaxValue,
+      deliveryTimeoutMs = Int.MaxValue,
       batchSize = 0)
     sendAndVerify(producer)
   }
@@ -53,13 +54,14 @@ class PlaintextProducerSendTest extends BaseProducerSendTest {
   def testSendCompressedMessageWithLogAppendTime() {
     val producer = createProducer(brokerList = brokerList,
       compressionType = "gzip",
-      lingerMs = Int.MaxValue)
+      lingerMs = Int.MaxValue,
+      deliveryTimeoutMs = Int.MaxValue)
     sendAndVerifyTimestamp(producer, TimestampType.LOG_APPEND_TIME)
   }
 
   @Test
   def testSendNonCompressedMessageWithLogAppendTime() {
-    val producer = createProducer(brokerList = brokerList, lingerMs = Int.MaxValue)
+    val producer = createProducer(brokerList = brokerList, lingerMs = Int.MaxValue, deliveryTimeoutMs = Int.MaxValue)
     sendAndVerifyTimestamp(producer, TimestampType.LOG_APPEND_TIME)
   }
 

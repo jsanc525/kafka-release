@@ -29,6 +29,7 @@ TAGS
 .vagrant
 Vagrantfile.local
 /logs
+.DS_Store
 
 config/server-*
 config/zookeeper-*
@@ -41,6 +42,7 @@ results
 tests/results
 .ducktape
 tests/.ducktape
+tests/venv
 .cache
 gradlew
 gradlew.bat
@@ -51,3 +53,5 @@ docs/generated/
 kafkatest.egg-info/
 systest/
 *.swp
+clients/src/generated
+clients/src/generated-test

@@ -50,7 +50,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Future;
 
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.equalTo;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -145,6 +148,31 @@ public class RecordCollectorTest {
         assertEquals((Long) 0L, offsets.get(new TopicPartition("topic1", 2)));
     }
 
+    @Test
+    public void shouldNotAllowOffsetsToBeUpdatedExternally() {
+        final String topic = "topic1";
+        final TopicPartition topicPartition = new TopicPartition(topic, 0);
+
+        final RecordCollectorImpl collector = new RecordCollectorImpl(
+            "RecordCollectorTest-TestSpecificPartition",
+            new LogContext("RecordCollectorTest-TestSpecificPartition "),
+            new DefaultProductionExceptionHandler(),
+            new Metrics().sensor("skipped-records")
+        );
+        collector.init(new MockProducer<>(cluster, true, new DefaultPartitioner(), byteArraySerializer, byteArraySerializer));
+
+        collector.send(topic, "999", "0", null, 0, null, stringSerializer, stringSerializer);
+        collector.send(topic, "999", "0", null, 0, null, stringSerializer, stringSerializer);
+        collector.send(topic, "999", "0", null, 0, null, stringSerializer, stringSerializer);
+
+        final Map<TopicPartition, Long> offsets = collector.offsets();
+
+        assertThat(offsets.get(topicPartition), equalTo(2L));
+        assertThrows(UnsupportedOperationException.class, () -> offsets.put(new TopicPartition(topic, 0), 50L));
+
+        assertThat(collector.offsets().get(topicPartition), equalTo(2L));
+    }
+
     @SuppressWarnings("unchecked")
     @Test(expected = StreamsException.class)
     public void shouldThrowStreamsExceptionOnAnyExceptionButProducerFencedException() {
@@ -214,7 +242,7 @@ public class RecordCollectorTest {
         final Metrics metrics = new Metrics();
         final Sensor sensor = metrics.sensor("skipped-records");
         final LogCaptureAppender logCaptureAppender = LogCaptureAppender.createAndRegister();
-        final MetricName metricName = new MetricName("name", "group", "description", Collections.EMPTY_MAP);
+        final MetricName metricName = new MetricName("name", "group", "description", Collections.emptyMap());
         sensor.add(metricName, new Sum());
         final RecordCollector collector = new RecordCollectorImpl(
             "test",
@@ -230,7 +258,7 @@ public class RecordCollectorTest {
         });
         collector.send("topic1", "3", "0", null, null, stringSerializer, stringSerializer, streamPartitioner);
         assertEquals(1.0, metrics.metrics().get(metricName).metricValue());
-        assertTrue(logCaptureAppender.getMessages().contains("test Error sending records (key=[3] value=[0] timestamp=[null]) to topic=[topic1] and partition=[0]; The exception handler chose to CONTINUE processing in spite of this error."));
+        assertTrue(logCaptureAppender.getMessages().contains("test Error sending records topic=[topic1] and partition=[0]; The exception handler chose to CONTINUE processing in spite of this error. Enable TRACE logging to view failed messages key and value."));
         LogCaptureAppender.unregister(logCaptureAppender);
     }
 
@@ -335,7 +363,7 @@ public class RecordCollectorTest {
         collector.init(new MockProducer(cluster, true, new DefaultPartitioner(), byteArraySerializer, byteArraySerializer) {
             @Override
             public List<PartitionInfo> partitionsFor(final String topic) {
-                return Collections.EMPTY_LIST;
+                return Collections.emptyList();
             }
 
         });
@@ -353,7 +381,7 @@ public class RecordCollectorTest {
         collector.init(new MockProducer(cluster, true, new DefaultPartitioner(), byteArraySerializer, byteArraySerializer) {
             @Override
             public List<PartitionInfo> partitionsFor(final String topic) {
-                return Collections.EMPTY_LIST;
+                return Collections.emptyList();
             }
 
         });
@@ -364,7 +392,7 @@ public class RecordCollectorTest {
     public void testRecordHeaderPassThroughSerializer() {
         final CustomStringSerializer keySerializer = new CustomStringSerializer();
         final CustomStringSerializer valueSerializer = new CustomStringSerializer();
-        keySerializer.configure(Collections.EMPTY_MAP, true);
+        keySerializer.configure(Collections.emptyMap(), true);
 
         final RecordCollectorImpl collector = new RecordCollectorImpl(
                 "test",
@@ -385,6 +413,18 @@ public class RecordCollectorTest {
             assertEquals(new RecordHeader("key", "key".getBytes()), headers.lastHeader("key"));
             assertEquals(new RecordHeader("value", "value".getBytes()), headers.lastHeader("value"));
         }
+    }
+
+    @Test
+    public void testShouldNotThrowNPEOnCloseIfProducerIsNotInitialized() {
+        final RecordCollectorImpl collector = new RecordCollectorImpl(
+                "NoNPE",
+                logContext,
+                new DefaultProductionExceptionHandler(),
+                new Metrics().sensor("skipped-records")
+        );
+
+        collector.close();
     }
 
     private static class CustomStringSerializer extends StringSerializer {

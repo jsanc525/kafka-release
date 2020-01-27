@@ -47,7 +47,6 @@ import java.io.IOException;
 import java.nio.BufferUnderflowException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -90,16 +89,13 @@ public class StreamsUpgradeTest {
         final KafkaStreams streams = new KafkaStreams(builder.build(), config, kafkaClientSupplier);
         streams.start();
 
-        Runtime.getRuntime().addShutdownHook(new Thread() {
-            @Override
-            public void run() {
-                System.out.println("closing Kafka Streams instance");
-                System.out.flush();
-                streams.close();
-                System.out.println("UPGRADE-TEST-CLIENT-CLOSED");
-                System.out.flush();
-            }
-        });
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            System.out.println("closing Kafka Streams instance");
+            System.out.flush();
+            streams.close();
+            System.out.println("UPGRADE-TEST-CLIENT-CLOSED");
+            System.out.flush();
+        }));
     }
 
     private static class FutureKafkaClientSupplier extends DefaultKafkaClientSupplier {
@@ -167,8 +163,13 @@ public class StreamsUpgradeTest {
             final AssignmentInfo info = AssignmentInfo.decode(
                 assignment.userData().putInt(0, AssignmentInfo.LATEST_SUPPORTED_VERSION));
 
+            if (super.maybeUpdateSubscriptionVersion(usedVersion, info.commonlySupportedVersion())) {
+                setAssignmentErrorCode(Error.VERSION_PROBING.code());
+                return;
+            }
+
             final List<TopicPartition> partitions = new ArrayList<>(assignment.partitions());
-            Collections.sort(partitions, PARTITION_COMPARATOR);
+            partitions.sort(PARTITION_COMPARATOR);
 
             // version 1 field
             final Map<TaskId, Set<TopicPartition>> activeTasks = new HashMap<>();
@@ -296,6 +297,7 @@ public class StreamsUpgradeTest {
         private FutureAssignmentInfo(final boolean bumpUsedVersion,
                                      final boolean bumpSupportedVersion,
                                      final ByteBuffer bytes) {
+            super(LATEST_SUPPORTED_VERSION, LATEST_SUPPORTED_VERSION);
             this.bumpUsedVersion = bumpUsedVersion;
             this.bumpSupportedVersion = bumpSupportedVersion;
             originalUserMetadata = bytes;

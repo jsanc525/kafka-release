@@ -44,6 +44,7 @@ public class SSLUtils {
     /**
      * Configures SSL/TLS for HTTPS Jetty Server / Client
      */
+    @SuppressWarnings("deprecation")
     public static SslContextFactory createSslContextFactory(WorkerConfig config, boolean client) {
         Map<String, Object> sslConfigValues = config.valuesWithPrefixAllOrNothing("listeners.https.");
 
@@ -104,6 +105,7 @@ public class SSLUtils {
     /**
      * Configures Protocol, Algorithm and Provider related settings in SslContextFactory
      */
+    @SuppressWarnings("unchecked")
     protected static void configureSslContextFactoryAlgorithms(SslContextFactory ssl, Map<String, Object> sslConfigValues) {
         List<String> sslEnabledProtocols = (List<String>) getOrDefault(sslConfigValues, SslConfigs.SSL_ENABLED_PROTOCOLS_CONFIG, Arrays.asList(COMMA_WITH_WHITESPACE.split(SslConfigs.DEFAULT_SSL_ENABLED_PROTOCOLS)));
         ssl.setIncludeProtocols(sslEnabledProtocols.toArray(new String[sslEnabledProtocols.size()]));
@@ -139,6 +141,7 @@ public class SSLUtils {
     /**
      * Configures Authentication related settings in SslContextFactory
      */
+    @SuppressWarnings("deprecation")
     protected static void configureSslContextFactoryAuthentication(SslContextFactory ssl, Map<String, Object> sslConfigValues) {
         String sslClientAuth = (String) getOrDefault(sslConfigValues, BrokerSecurityConfigs.SSL_CLIENT_AUTH_CONFIG, "none");
         switch (sslClientAuth) {

@@ -220,8 +220,9 @@ public abstract class AbstractTask implements Task {
             }
         } catch (final IOException e) {
             throw new StreamsException(
-                String.format("%sFatal error while trying to lock the state directory for task %s",
-                logPrefix, id));
+                String.format("%sFatal error while trying to lock the state directory for task %s", logPrefix, id),
+                e
+            );
         }
         log.trace("Initializing state stores");
 
@@ -240,15 +241,13 @@ public abstract class AbstractTask implements Task {
     }
 
     /**
-     * @param writeCheckpoint boolean indicating if a checkpoint file should be written
      * @throws ProcessorStateException if there is an error while closing the state manager
      */
-    // visible for testing
-    void closeStateManager(final boolean writeCheckpoint) throws ProcessorStateException {
+    void closeStateManager(final boolean clean) throws ProcessorStateException {
         ProcessorStateException exception = null;
         log.trace("Closing state manager");
         try {
-            stateMgr.close(writeCheckpoint ? activeTaskCheckpointableOffsets() : null);
+            stateMgr.close(clean);
         } catch (final ProcessorStateException e) {
             exception = e;
         } finally {
