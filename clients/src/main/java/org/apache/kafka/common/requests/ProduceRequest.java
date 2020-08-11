@@ -192,8 +192,8 @@ public class ProduceRequest extends AbstractRequest {
     // put in the purgatory (due to client throttling, it can take a while before the response is sent).
     // Care should be taken in methods that use this field.
     private volatile Map<TopicPartition, MemoryRecords> partitionRecords;
-    private boolean hasTransactionalRecords = false;
-    private boolean hasIdempotentRecords = false;
+    private boolean transactional = false;
+    private boolean idempotent = false;
 
     private ProduceRequest(short version, short acks, int timeout, Map<TopicPartition, MemoryRecords> partitionRecords, String transactionalId) {
         super(version);
@@ -257,6 +257,7 @@ public class ProduceRequest extends AbstractRequest {
         // Note that we do not do similar validation for older versions to ensure compatibility with
         // clients which send the wrong magic version in the wrong version of the produce request. The broker
         // did not do this validation before, so we maintain that behavior here.
+    }
 
     /**
      * Visible for testing.
@@ -358,12 +359,12 @@ public class ProduceRequest extends AbstractRequest {
         return transactionalId;
     }
 
-    public boolean hasTransactionalRecords() {
-        return hasTransactionalRecords;
+    public boolean isTransactional() {
+        return transactional;
     }
 
-    public boolean hasIdempotentRecords() {
-        return hasIdempotentRecords;
+    public boolean isIdempotent() {
+        return idempotent;
     }
 
     /**
